@@ -35,6 +35,7 @@ type ReviewEvent struct {
 type Head struct {
 	SHA        string `json:"sha"`
 	BranchName string `json:"ref"`
+	Repo       Repo   `json:"repo"`
 }
 
 // Review contains information about the pull request review
@@ -57,7 +58,8 @@ type PullRequest struct {
 
 // Base contains the base branch commit SHA
 type Base struct {
-	SHA string `json:"sha"`
+	SHA  string `json:"sha"`
+	Repo Repo   `json:"repo"`
 }
 
 // PR contains information about the pull request (used for the pull request event)
@@ -76,6 +78,10 @@ type Repository struct {
 // Owner contains information about the repository owner
 type Owner struct {
 	Name string `json:"login"`
+}
+
+type Repo struct {
+	FullName string `json:"full_name"`
 }
 
 // action represents the current action
