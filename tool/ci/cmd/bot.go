@@ -42,10 +42,6 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = bot.HasWorkflowApproval(ctx)
-		if err != nil {
-			log.Fatal(err)
-		}
 		err = bot.Assign(ctx)
 		if err != nil {
 			log.Fatal(err)
@@ -54,10 +50,6 @@ func main() {
 	case ci.CheckSubcommand:
 		log.Println("Checking reviewers.")
 		bot, err := constructBot(ctx, client, *reviewers)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = bot.HasWorkflowApproval(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -87,6 +79,20 @@ func main() {
 			log.Fatal(err)
 		}
 		log.Println("Stale workflow run removal completed.")
+	case "check-approved-run": 
+		// get github event path 
+		// get issue.pull_request.url
+		// get most recent assign and check workflow then rerun them 
+		bot, err := constructBot(ctx, client, *reviewers)
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = bot.HasWorkflowApproval(ctx, 65)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// Re run workflows
+
 	default:
 		log.Fatalf("Unknown subcommand: %v.\n%s", subcommand, usage)
 	}

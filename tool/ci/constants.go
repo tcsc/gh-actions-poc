@@ -69,4 +69,7 @@ const (
 	// RUNCI is a string that is searched for in a github.PullRequestComment body to 
 	// permit a workflow to continue running. 
 	RUNCI = "run ci"
+
+	// check-run-approved
+	
 )

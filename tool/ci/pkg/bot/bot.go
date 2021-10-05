@@ -71,30 +71,25 @@ func (c *Config) CheckAndSetDefaults() error {
 // To work around this, this method is being called to check the comments of the
 // pull request in the current context for permission from a repository owner
 // to run the rest of the workflow.
-func (c *Bot) HasWorkflowApproval(ctx context.Context) error {
+func (c *Bot) HasWorkflowApproval(ctx context.Context, commentID int64) error {
 	pr := c.Environment.Metadata
 	if c.Environment.IsInternal(pr.Author) {
 		return nil
 	}
-	log.Println("Checking coomments...")
+	log.Println("Checking comments...")
 	fmt.Printf("%+v", pr)
-	comments, _, err := c.Environment.Client.PullRequests.ListComments(ctx,
+	comments, _, err := c.Environment.Client.PullRequests.GetComment(ctx,
 		pr.RepoOwner,
 		pr.RepoName,
-		pr.Number,
-		&github.PullRequestListCommentsOptions{},
+		commentID,
 	)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	log.Println("Ranging over comments...")
-
-	for _, comment := range comments {
-		if ok := c.commentPermitsRun(comment); ok {
-			return nil
-		}
+	if ok := c.commentPermitsRun(comments); ok {
+		return nil
 	}
-	fmt.Printf("%+v", comments)
 	return trace.BadParameter("workflow runs have not been approved for this pull request")
 }
 
