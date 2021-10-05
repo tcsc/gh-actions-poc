@@ -77,6 +77,7 @@ func (c *Bot) HasWorkflowApproval(ctx context.Context) error {
 		return nil
 	}
 	log.Println("Checking coomments...")
+	fmt.Printf("%+v", pr)
 	comments, _, err := c.Environment.Client.PullRequests.ListComments(ctx,
 		pr.RepoOwner,
 		pr.RepoName,
