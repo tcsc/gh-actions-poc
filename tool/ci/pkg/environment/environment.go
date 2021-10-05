@@ -3,6 +3,7 @@ package environment
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 
@@ -195,6 +196,8 @@ func GetMetadata(path string) (*Metadata, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+	fmt.Println(actionType.Action, "~~~~~~~~~~~~~~~~~~~~~~~")
+
 	return getMetadata(body, actionType.Action)
 }
 
