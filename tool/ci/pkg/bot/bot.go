@@ -93,6 +93,7 @@ func (c *Bot) HasWorkflowApproval(ctx context.Context) error {
 			return nil
 		}
 	}
+	fmt.Printf("%+v", comments)
 	return trace.BadParameter("workflow runs have not been approved for this pull request")
 }
 
