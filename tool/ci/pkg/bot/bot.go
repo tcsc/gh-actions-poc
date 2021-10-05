@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"log"
 	"sort"
 
 	"github.com/gravitational/gh-actions-poc/tool/ci"
@@ -75,6 +76,7 @@ func (c *Bot) HasWorkflowApproval(ctx context.Context) error {
 	if c.Environment.IsInternal(pr.Author) {
 		return nil
 	}
+	log.Println("Checking coomments...")
 	comments, _, err := c.Environment.Client.PullRequests.ListComments(ctx,
 		pr.RepoOwner,
 		pr.RepoName,
@@ -84,6 +86,8 @@ func (c *Bot) HasWorkflowApproval(ctx context.Context) error {
 	if err != nil {
 		return trace.Wrap(err)
 	}
+	log.Println("Ranging over comments...")
+
 	for _, comment := range comments {
 		if ok := c.commentPermitsRun(comment); ok {
 			return nil
@@ -101,12 +105,17 @@ func (c *Bot) HasWorkflowApproval(ctx context.Context) error {
 func (c *Bot) commentPermitsRun(comment *github.PullRequestComment) bool {
 	pr := c.Environment.Metadata
 	if *comment.CommitID != pr.HeadSHA {
+		log.Println("commit doesn't contain most recent commit")
 		return false
 	}
+
 	if !strings.Contains(*comment.Body, ci.RUNCI) {
+		log.Println("body does not contain run ci")
+
 		return false
 	}
 	admins := c.Environment.GetReviewersForAuthor("")
+	log.Printf("admins %+v", admins)
 	for _, admin := range admins {
 		if *comment.AuthorAssociation == ci.Owner && *comment.User.Login == admin {
 			return true
