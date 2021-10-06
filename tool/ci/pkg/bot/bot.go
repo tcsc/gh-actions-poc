@@ -78,12 +78,13 @@ func (c *Bot) HasWorkflowRunApproval(ctx context.Context) error {
 	}
 	log.Println("Checking comments...")
 	fmt.Printf("%+v", pr)
-	comments, _, err := c.Environment.Client.PullRequests.ListComments(ctx,
+	comments, resp, err := c.Environment.Client.PullRequests.ListComments(ctx,
 		pr.RepoOwner,
 		pr.RepoName,
 		pr.Number,
 		&github.PullRequestListCommentsOptions{},
 	)
+	fmt.Println("~~~~~~~~", resp.Status)
 	if err != nil {
 		return trace.Wrap(err)
 	}
