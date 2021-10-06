@@ -150,11 +150,11 @@ func (c *Bot) DismissStaleWorkflowRuns(ctx context.Context, owner, repoName, bra
 	// Get the target workflow to know get runs triggered by the `Check` workflow.
 	// The `Check` workflow is being targeted because it is the only workflow
 	// that runs multiple times per PR.
-	workflow, err := c.getCheckWorkflow(ctx, owner, repoName)
+	workflow, err := c.getWorkflow(ctx, owner, repoName, ci.CheckWorkflow)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	runs, err := c.findStaleWorkflowRuns(ctx, owner, repoName, branch, *workflow.ID)
+	runs, err := c.getSortedWorkflowRuns(ctx, owner, repoName, branch, *workflow.ID)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -166,14 +166,49 @@ func (c *Bot) DismissStaleWorkflowRuns(ctx context.Context, owner, repoName, bra
 	return nil
 }
 
+func (c *Bot) ReRunWorkflows(ctx context.Context) error {
+	pr := c.Environment.Metadata
+	// get both workflow files
+	checkWorkflow, err := c.getWorkflow(ctx, pr.RepoOwner, pr.RepoName, ci.CheckWorkflow)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	err = c.redoMostRecentRun(ctx, *checkWorkflow.ID)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	assignWorkflow, err := c.getWorkflow(ctx, pr.RepoOwner, pr.RepoName, ci.AssignWorkflow)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	err = c.redoMostRecentRun(ctx, *assignWorkflow.ID)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
+func (c *Bot) redoMostRecentRun(ctx context.Context, workflowID int64) error {
+	var targetRun *github.WorkflowRun
+	pr := c.Environment.Metadata
+	runs, err := c.getSortedWorkflowRuns(ctx, pr.RepoOwner, pr.RepoName, pr.BranchName, workflowID)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if len(runs) < 1 {
+		return trace.NotFound("workflow run not found")
+	}
+	targetRun = runs[len(runs)-1]
+	_, err = c.Environment.Client.Actions.RerunWorkflowByID(ctx, pr.RepoOwner, pr.RepoName, targetRun.GetID())
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
 // deleteRuns deletes all workflow runs except the most recent one because that is
 // the run in the current context.
 func (c *Bot) deleteRuns(ctx context.Context, owner, repoName string, runs []*github.WorkflowRun) error {
-	// Sorting runs by time from oldest to newest.
-	sort.Slice(runs, func(i, j int) bool {
-		time1, time2 := runs[i].CreatedAt, runs[j].CreatedAt
-		return time1.Time.Before(time2.Time)
-	})
 	// Deleting all runs except the most recent one.
 	for i := 0; i < len(runs)-1; i++ {
 		run := runs[i]
@@ -185,28 +220,34 @@ func (c *Bot) deleteRuns(ctx context.Context, owner, repoName string, runs []*gi
 	return nil
 }
 
-func (c *Bot) findStaleWorkflowRuns(ctx context.Context, owner, repoName, branchName string, workflowID int64) ([]*github.WorkflowRun, error) {
+func (c *Bot) getSortedWorkflowRuns(ctx context.Context, owner, repoName, branchName string, workflowID int64) ([]*github.WorkflowRun, error) {
+	var runs []*github.WorkflowRun
 	clt := c.GithubClient.Client
 	list, _, err := clt.Actions.ListWorkflowRunsByID(ctx, owner, repoName, workflowID, &github.ListWorkflowRunsOptions{Branch: branchName})
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return list.WorkflowRuns, nil
+	runs = list.WorkflowRuns
+	sort.Slice(runs, func(i, j int) bool {
+		time1, time2 := runs[i].CreatedAt, runs[j].CreatedAt
+		return time1.Time.Before(time2.Time)
+	})
+	return runs, nil
 }
 
-// getCheckWorkflow gets the workflow named 'Check'.
-func (c *Bot) getCheckWorkflow(ctx context.Context, owner, repoName string) (*github.Workflow, error) {
+// getWorkflow gets the workflow named 'Check'.
+func (c *Bot) getWorkflow(ctx context.Context, owner, repoName, workflowName string) (*github.Workflow, error) {
 	clt := c.GithubClient.Client
 	workflows, _, err := clt.Actions.ListWorkflows(ctx, owner, repoName, &github.ListOptions{})
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	for _, w := range workflows.Workflows {
-		if *w.Name == ci.CheckWorkflow {
+		if *w.Name == workflowName {
 			return w, nil
 		}
 	}
-	return nil, trace.NotFound("workflow %s not found", ci.CheckWorkflow)
+	return nil, trace.NotFound("workflow %s not found", workflowName)
 }
 
 const (

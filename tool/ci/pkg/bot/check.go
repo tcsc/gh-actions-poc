@@ -18,6 +18,12 @@ import (
 // Check checks if all the reviewers have approved the pull request in the current context.
 func (c *Bot) Check(ctx context.Context) error {
 	pr := c.Environment.Metadata
+	if !c.Environment.IsInternal(pr.Author) {
+		err := c.HasWorkflowRunApproval(ctx)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+	}
 	// Remove any stale workflow runs. As only the current workflow run should
 	// be shown because it is the workflow that reflects the correct state of the pull.
 	//
@@ -55,9 +61,8 @@ func (c *Bot) check(ctx context.Context) error {
 		// not carry over to when new changes are added. Github does
 		// not do this automatically, so we must dismiss the reviews
 		// manually.
-
 		if _, err = c.isGithubCommit(ctx); err == nil {
-			// No more work need to be done here. 
+			// No more work need to be done here.
 		} else {
 
 			validReviews, obsoleteReviews = splitReviews(pr.HeadSHA, mostRecentReviews)

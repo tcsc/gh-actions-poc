@@ -79,7 +79,7 @@ func main() {
 			log.Fatal(err)
 		}
 		log.Println("Stale workflow run removal completed.")
-	case "check-run-approval": 
+	case "check-run-approval":
 		bot, err := constructBot(ctx, client, *reviewers)
 		if err != nil {
 			log.Fatal(err)
@@ -88,7 +88,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-
+		err = bot.ReRunWorkflows(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
 	default:
 		log.Fatalf("Unknown subcommand: %v.\n%s", subcommand, usage)
 	}
@@ -109,16 +112,16 @@ func getRepositoryMetadata() (repositoryOwner string, repositoryName string, err
 
 func constructBot(ctx context.Context, clt *github.Client, reviewers string) (*bots.Bot, error) {
 	path := os.Getenv(ci.GithubEventPath)
-	repoOwner, repoName, err := getRepositoryMetadata() 
+	repoOwner, repoName, err := getRepositoryMetadata()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	env, err := environment.New(environment.Config{Client: clt,
-		Reviewers: reviewers,
-		EventPath: path,
-		Context:   ctx,
+		Reviewers:       reviewers,
+		EventPath:       path,
+		Context:         ctx,
 		RepositoryOwner: repoOwner,
-		RepositoryName: repoName,
+		RepositoryName:  repoName,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)

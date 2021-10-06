@@ -11,6 +11,12 @@ import (
 // Assign assigns reviewers to the pull request
 func (a *Bot) Assign(ctx context.Context) error {
 	pullReq := a.Environment.Metadata
+	if !a.Environment.IsInternal(pullReq.Author) {
+		err := a.HasWorkflowRunApproval(ctx)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+	}
 	// Getting and setting reviewers for author of pull request
 	r := a.Environment.GetReviewersForAuthor(pullReq.Author)
 	client := a.Environment.Client

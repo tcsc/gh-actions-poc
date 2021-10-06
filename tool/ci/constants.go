@@ -38,6 +38,9 @@ const (
 	// CheckWorkflow is the name of a workflow.
 	CheckWorkflow = "Check"
 
+	// AssignWorkflow is the name of the workflow that assigns reviewers. 
+	AssignWorkflow = "Assign"
+
 	// Synchronize is an event type that is triggered when a commit is pushed to an
 	// open pull request.
 	Synchronize = "synchronize"
