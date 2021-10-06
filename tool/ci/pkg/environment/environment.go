@@ -240,6 +240,7 @@ func getMetadata(pr *github.PullRequest) (*Metadata, error) {
 		BaseSHA:    *pr.Base.SHA,
 		HeadSHA:    *pr.Head.SHA,
 		BranchName: *pr.Head.Ref,
+		Number:     *pr.Number,
 	}, nil
 }
 
