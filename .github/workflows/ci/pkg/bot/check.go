@@ -55,16 +55,18 @@ func (c *Bot) check(ctx context.Context) error {
 		// not carry over to when new changes are added. Github does
 		// not do this automatically, so we must dismiss the reviews
 		// manually.
-		_, err := c.isGithubCommit(ctx)
-		if err != nil {
-			return trace.Wrap(err)
-		}
+		if err = c.isGithubCommit(ctx); err == nil {
+			// new commit is a special github-authored merge (?) and
+			// we don't need to invalidate the reviews for that.
+			// No more work to be done here.
+		} else {
 
-		validReviews, obsoleteReviews = splitReviews(pr.HeadSHA, mostRecentReviews)
-		msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
-		err = c.invalidateApprovals(ctx, msg, obsoleteReviews)
-		if err != nil {
-			return trace.Wrap(err)
+			validReviews, obsoleteReviews = splitReviews(pr.HeadSHA, mostRecentReviews)
+			msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
+			err = c.invalidateApprovals(ctx, msg, obsoleteReviews)
+			if err != nil {
+				return trace.Wrap(err)
+			}
 		}
 	}
 	log.Printf("Checking if %v has approvals from the required reviewers %+v", pr.Author, c.Environment.GetReviewersForAuthor(pr.Author))
@@ -217,7 +219,7 @@ func dismissMessage(pr *environment.Metadata, required []string) string {
 // Commits are checked for verification and emptiness specifically to determine if a
 // pull request's reviews should be invalidated. If a commit is signed by Github and is empty
 // there is no need to invalidate commits because the branch is just being updated.
-func (c *Bot) isGithubCommit(ctx context.Context) (bool, error) {
+func (c *Bot) isGithubCommit(ctx context.Context) error {
 	pr := c.Environment.Metadata
 	comparison, _, err := c.Environment.Client.Repositories.CompareCommits(
 		ctx,
@@ -227,14 +229,14 @@ func (c *Bot) isGithubCommit(ctx context.Context) (bool, error) {
 		pr.HeadSHA,
 	)
 	if err != nil {
-		return false, trace.Wrap(err)
+		return trace.Wrap(err)
 	}
 	if len(comparison.Files) != 0 {
-		return false, trace.BadParameter("detected file change")
+		return trace.BadParameter("detected file change")
 	}
 	commit, _, err := c.Environment.Client.Repositories.GetCommit(ctx, pr.RepoOwner, pr.RepoName, pr.HeadSHA)
 	if err != nil {
-		return false, trace.Wrap(err)
+		return trace.Wrap(err)
 	}
 	verification := commit.Commit.Verification
 	if verification != nil {
@@ -243,11 +245,11 @@ func (c *Bot) isGithubCommit(ctx context.Context) (bool, error) {
 			// If commit is empty (no file changes) and the commit is signed by Github,
 			// there is no need to invalidate the commit.
 			if strings.Contains(payload, ci.GithubCommit) && *verification.Verified {
-				return true, nil
+				return nil
 			}
 		}
 	}
-	return false, trace.BadParameter("commit is not verified and/or is not signed by GitHub")
+	return trace.BadParameter("commit is not verified and/or is not signed by GitHub")
 }
 
 // invalidateApprovals dismisses all approved reviews on a pull request.
