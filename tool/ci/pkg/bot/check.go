@@ -55,16 +55,17 @@ func (c *Bot) check(ctx context.Context) error {
 		// not carry over to when new changes are added. Github does
 		// not do this automatically, so we must dismiss the reviews
 		// manually.
-		_, err := c.isGithubCommit(ctx)
-		if err != nil {
-			return trace.Wrap(err)
-		}
 
-		validReviews, obsoleteReviews = splitReviews(pr.HeadSHA, mostRecentReviews)
-		msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
-		err = c.invalidateApprovals(ctx, msg, obsoleteReviews)
-		if err != nil {
-			return trace.Wrap(err)
+		if _, err = c.isGithubCommit(ctx); err == nil {
+			// No more work need to be done here. 
+		} else {
+
+			validReviews, obsoleteReviews = splitReviews(pr.HeadSHA, mostRecentReviews)
+			msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
+			err = c.invalidateApprovals(ctx, msg, obsoleteReviews)
+			if err != nil {
+				return trace.Wrap(err)
+			}
 		}
 	}
 	log.Printf("Checking if %v has approvals from the required reviewers %+v", pr.Author, c.Environment.GetReviewersForAuthor(pr.Author))
