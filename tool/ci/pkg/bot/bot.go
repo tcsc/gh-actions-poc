@@ -78,11 +78,11 @@ func (c *Bot) HasWorkflowRunApproval(ctx context.Context) error {
 	}
 	log.Println("Checking comments...")
 	fmt.Printf("%+v", pr)
-	comments, resp, err := c.Environment.Client.PullRequests.ListComments(ctx,
+	comments, resp, err := c.Environment.Client.Issues.ListComments(ctx,
 		pr.RepoOwner,
 		pr.RepoName,
 		pr.Number,
-		&github.PullRequestListCommentsOptions{},
+		&github.IssueListCommentsOptions{},
 	)
 	fmt.Println("~~~~~~~~", resp.Status)
 	if err != nil {
@@ -105,12 +105,13 @@ func (c *Bot) HasWorkflowRunApproval(ctx context.Context) error {
 //		  are equal.
 // 		- The comment body contains the string "run ci".
 // 		- The author relationship to the pull request's repository is an owner.
-func (c *Bot) commentPermitsRun(comment *github.PullRequestComment) bool {
-	pr := c.Environment.Metadata
-	if *comment.CommitID != pr.HeadSHA {
-		log.Println("commit doesn't contain most recent commit")
-		return false
-	}
+func (c *Bot) commentPermitsRun(comment *github.IssueComment) bool {
+	// if *comment.CommitID != pr.HeadSHA {
+	// 	log.Println("commit doesn't contain most recent commit")
+	// 	return false
+	// }
+	// get last commit on PR 
+	// compare time where commit was pushed to when the last comment was made 
 	if !strings.Contains(*comment.Body, ci.RUNCI) {
 		log.Println("body does not contain run ci")
 
