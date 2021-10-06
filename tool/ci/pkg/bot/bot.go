@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
-	"log"
 	"sort"
 
 	"github.com/gravitational/gh-actions-poc/tool/ci"
@@ -76,23 +76,21 @@ func (c *Bot) HasWorkflowRunApproval(ctx context.Context) error {
 	if c.Environment.IsInternal(pr.Author) {
 		return nil
 	}
-	log.Println("Checking comments...")
-	fmt.Printf("%+v", pr)
-	comments, resp, err := c.Environment.Client.Issues.ListComments(ctx,
+	comments, _, err := c.Environment.Client.Issues.ListComments(ctx,
 		pr.RepoOwner,
 		pr.RepoName,
 		pr.Number,
 		&github.IssueListCommentsOptions{},
 	)
-	fmt.Println("~~~~~~~~", resp.Status)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	fmt.Printf("comments ----> %+v", comments)
-	log.Println("Ranging over comments...")
+	lastCommitTime, err := c.getMostRecentCommitCreatedTime(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
 	for _, comment := range comments {
-		if ok := c.commentPermitsRun(comment); ok {
-			fmt.Println(*comment.Body)
+		if err := c.commentPermitsRun(ctx, lastCommitTime, comment); err == nil {
 			return nil
 		}
 	}
@@ -105,26 +103,34 @@ func (c *Bot) HasWorkflowRunApproval(ctx context.Context) error {
 //		  are equal.
 // 		- The comment body contains the string "run ci".
 // 		- The author relationship to the pull request's repository is an owner.
-func (c *Bot) commentPermitsRun(comment *github.IssueComment) bool {
-	// if *comment.CommitID != pr.HeadSHA {
-	// 	log.Println("commit doesn't contain most recent commit")
-	// 	return false
-	// }
-	// get last commit on PR 
-	// compare time where commit was pushed to when the last comment was made 
-	if !strings.Contains(*comment.Body, ci.RUNCI) {
-		log.Println("body does not contain run ci")
+func (c *Bot) commentPermitsRun(ctx context.Context, lastCommitTime time.Time, comment *github.IssueComment) error {
+	commentTime := *comment.CreatedAt
+	if commentTime.Before(lastCommitTime) {
+		return trace.BadParameter("comment was created before the most recent commit")
 
-		return false
+	}
+	// get last commit on PR
+	// compare time where commit was pushed to when the last comment was made
+	if !strings.Contains(*comment.Body, ci.RUNCI) {
+		return trace.BadParameter("body does not contain run ci")
+
 	}
 	admins := c.Environment.GetReviewersForAuthor("")
-	log.Printf("admins %+v", admins)
 	for _, admin := range admins {
-		if /* *comment.AuthorAssociation == ci.Owner && */ *comment.User.Login == admin {
-			return true
+		if *comment.AuthorAssociation == ci.Owner && *comment.User.Login == admin {
+			return nil
 		}
 	}
-	return false
+	return trace.BadParameter("comment does not permit workflow run")
+}
+
+func (c *Bot) getMostRecentCommitCreatedTime(ctx context.Context) (time.Time, error) {
+	pr := c.Environment.Metadata
+	commit, _, err := c.Environment.Client.Repositories.GetCommit(ctx, pr.RepoOwner, pr.RepoName, pr.HeadSHA)
+	if err != nil {
+		return time.Time{}, trace.Wrap(err)
+	}
+	return commit.Author.CreatedAt.Time, nil
 }
 
 // DimissStaleWorkflowRunsForExternalContributors dismisses stale workflow runs for external contributors.

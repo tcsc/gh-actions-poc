@@ -7,12 +7,12 @@ package environment
    to unmarshal appropiately.
 */
 
-type NewPullRequest struct {
-	PullRequest Num `json:"pull_request"`
+type PullRequest struct {
+	PullRequest Number `json:"pull_request"`
 }
 
-type Num struct {
-	Number int `json:"number"`
+type Number struct {
+	Value int `json:"number"`
 }
 
 type PRComment struct {
@@ -21,7 +21,7 @@ type PRComment struct {
 
 // Comment contains information amount the pull request comment.
 type Comment struct {
-	Number Num `json:"number"`
+	Number Number `json:"number"`
 }
 
 // action represents the current action

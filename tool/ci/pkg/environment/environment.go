@@ -189,7 +189,7 @@ func (e *PullRequestEnvironment) IsInternal(author string) bool {
 // GetMetadata gets the pull request metadata in the current context.
 func GetMetadata(ctx context.Context, path , repoOwner, repoName string, clt *github.Client) (*Metadata, error) {
 	var actionType action
-	var newPullRequest NewPullRequest
+	var newPullRequest PullRequest
 	var body []byte
 
 	file, err := os.Open(path)
@@ -224,23 +224,21 @@ func GetMetadata(ctx context.Context, path , repoOwner, repoName string, clt *gi
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		newPullRequest = NewPullRequest{
-			PullRequest: Num{
-				Number: comment.Comment.Number.Number,
+		newPullRequest = PullRequest{
+			PullRequest: Number{
+				Value: comment.Comment.Number.Value,
 			},
 		}
 	default:
-		// TODO 
-
+		return nil, trace.BadParameter("unknown action %s", actionType.Action)
 	}
 	pr, _, err := clt.PullRequests.Get(ctx,
 		repoOwner,
 		repoName,
-		newPullRequest.PullRequest.Number)
+		newPullRequest.PullRequest.Value)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-
 	return getMetadata(pr)
 }
 
