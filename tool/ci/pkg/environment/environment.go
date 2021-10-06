@@ -3,7 +3,6 @@ package environment
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"os"
 
@@ -25,6 +24,10 @@ type Config struct {
 	// EventPath is the path of the file with the complete
 	// webhook event payload on the runner.
 	EventPath string
+	// RepositoryOwner
+	RepositoryOwner string
+	// RepositoryName
+	RepositoryName string
 	// unmarshalReviewers is the function to unmarshal
 	// the `Reviewers` string into map[string][]string.
 	unmarshalReviewers unmarshalReviewersFn
@@ -89,6 +92,12 @@ func (c *Config) CheckAndSetDefaults() error {
 	if c.EventPath == "" {
 		return trace.BadParameter("missing parameter EventPath")
 	}
+	if c.RepositoryOwner == "" {
+		return trace.BadParameter("missing parameter RepositoryOwner")
+	}
+	if c.RepositoryName == "" {
+		return trace.BadParameter("missing parameter RepositoryName")
+	}
 	if c.unmarshalReviewers == nil {
 		c.unmarshalReviewers = unmarshalReviewers
 	}
@@ -105,7 +114,7 @@ func New(c Config) (*PullRequestEnvironment, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	pr, err := GetMetadata(c.Context, c.EventPath, c.Client)
+	pr, err := GetMetadata(c.Context, c.EventPath, c.RepositoryOwner, c.RepositoryName, c.Client)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -178,7 +187,7 @@ func (e *PullRequestEnvironment) IsInternal(author string) bool {
 }
 
 // GetMetadata gets the pull request metadata in the current context.
-func GetMetadata(ctx context.Context, path string, clt *github.Client) (*Metadata, error) {
+func GetMetadata(ctx context.Context, path , repoOwner, repoName string, clt *github.Client) (*Metadata, error) {
 	var actionType action
 	var newPullRequest NewPullRequest
 	var body []byte
@@ -197,42 +206,48 @@ func GetMetadata(ctx context.Context, path string, clt *github.Client) (*Metadat
 		return nil, trace.Wrap(err)
 	}
 
-	if actionType.Action != ci.Created {
+	switch actionType.Action {
+	case ci.Ready, ci.Synchronize, ci.Assigned, ci.Opened, ci.Reopened, ci.Submitted:
+		// Only unmarshalling the pull request number from each of these events as
+		// each event's payload in this case contains the number at `pull_request.number`.
+		// Later in the function, the api will be called with the number,
+		// repository owner, and repository name to get the rest of the pull request metadata.
 		err = json.Unmarshal(body, &newPullRequest)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-	} else {
-		var comment PRCommentEvent
+	case ci.Created:
+		// This case is a PR comment event type. The payload of this event 
+		// contains the pull request number at `issue.number`
+		var comment PRComment
 		err = json.Unmarshal(body, &comment)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 		newPullRequest = NewPullRequest{
-			PullRequest: NPR{
-				Number: comment.Comment.PullRequest.Number,
+			PullRequest: Num{
+				Number: comment.Comment.Number.Number,
 			},
 		}
-	}
+	default:
+		// TODO 
 
+	}
 	pr, _, err := clt.PullRequests.Get(ctx,
-		"gravitational",
-		"gh-actions-poc",
+		repoOwner,
+		repoName,
 		newPullRequest.PullRequest.Number)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	// Checking if action type is of type created a type of PR comment.
-	// The payload of the comment event does not contain all the pull request metadata,
-	// however it does contain the pull request url of where the comment is at.
-	// The work around is checking if the event is a comment event and getting the payload
-	// through the github API
 
 	return getMetadata(pr)
 }
 
 func getMetadata(pr *github.PullRequest) (*Metadata, error) {
-	fmt.Println(*pr.Head.Ref)
+	if err := validatePullRequest(pr); err != nil {
+		return nil, trace.Wrap(err)
+	}
 	return &Metadata{
 		Author:     *pr.User.Login,
 		RepoOwner:  *pr.Base.Repo.Owner.Login,
@@ -244,75 +259,22 @@ func getMetadata(pr *github.PullRequest) (*Metadata, error) {
 	}, nil
 }
 
-func (r *ReviewEvent) toMetadata() (*Metadata, error) {
-	pr, err := validateData(r.PullRequest.Number,
-		r.PullRequest.Author.Login,
-		r.Repository.Owner.Name,
-		r.Repository.Name,
-		r.PullRequest.Head.SHA,
-		r.PullRequest.Base.SHA,
-		r.PullRequest.Head.BranchName,
-		r.PullRequest.Head.Repo.FullName,
-		r.PullRequest.Base.Repo.FullName,
-	)
-	if err != nil {
-		return &Metadata{}, err
-	}
-	if r.Review.User.Login == "" {
-		return &Metadata{}, trace.BadParameter("missing reviewer username")
-	}
-	return pr, nil
-}
-
-func (p *PullRequestEvent) toMetadata() (*Metadata, error) {
-	return validateData(p.Number,
-		p.PullRequest.User.Login,
-		p.Repository.Owner.Name,
-		p.Repository.Name,
-		p.PullRequest.Head.SHA,
-		p.PullRequest.Base.SHA,
-		p.PullRequest.Head.BranchName,
-		p.PullRequest.Head.Repo.FullName,
-		p.PullRequest.Base.Repo.FullName,
-	)
-}
-
-func (s *PushEvent) toMetadata() (*Metadata, error) {
-	return validateData(s.Number,
-		s.PullRequest.User.Login,
-		s.Repository.Owner.Name,
-		s.Repository.Name,
-		s.CommitSHA,
-		s.BeforeSHA,
-		s.PullRequest.Head.BranchName,
-		s.PullRequest.Head.Repo.FullName,
-		s.PullRequest.Base.Repo.FullName,
-	)
-}
-
-func validateData(num int, login, owner, repoName, headSHA, baseSHA, branchName, headFullName, baseFullName string) (*Metadata, error) {
+func validatePullRequest(pr *github.PullRequest) error {
 	switch {
-	case num == 0:
-		return &Metadata{}, trace.BadParameter("missing pull request number")
-	case login == "":
-		return &Metadata{}, trace.BadParameter("missing user login")
-	case owner == "":
-		return &Metadata{}, trace.BadParameter("missing repository owner")
-	case repoName == "":
-		return &Metadata{}, trace.BadParameter("missing repository name")
-	case headSHA == "":
-		return &Metadata{}, trace.BadParameter("missing head commit sha")
-	case baseSHA == "":
-		return &Metadata{}, trace.BadParameter("missing base commit sha")
-	case branchName == "":
-		return &Metadata{}, trace.BadParameter("missing branch name")
+	case pr.Number == nil:
+		return trace.BadParameter("missing pull request number")
+	case pr.User.Login == nil:
+		return trace.BadParameter("missing user login")
+	case pr.Base.Repo.Owner.Login == nil:
+		return trace.BadParameter("missing repository owner")
+	case pr.Base.Repo.Name == nil:
+		return trace.BadParameter("missing repository name")
+	case pr.Head.SHA == nil:
+		return trace.BadParameter("missing head commit sha")
+	case pr.Base.SHA == nil:
+		return trace.BadParameter("missing base commit sha")
+	case pr.Head.Ref == nil:
+		return trace.BadParameter("missing branch name")
 	}
-
-	return &Metadata{Number: num,
-		Author:     login,
-		RepoOwner:  owner,
-		RepoName:   repoName,
-		HeadSHA:    headSHA,
-		BaseSHA:    baseSHA,
-		BranchName: branchName}, nil
+	return nil
 }

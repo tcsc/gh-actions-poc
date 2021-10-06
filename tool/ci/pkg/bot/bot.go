@@ -61,7 +61,7 @@ func (c *Config) CheckAndSetDefaults() error {
 	return nil
 }
 
-// HasWorkflowApproval checks if a PR has approval for the rest of the check
+// HasWorkflowRunApproval checks if a PR has approval for the rest of the check
 // workflow to run.
 // Currently, there is not a way to approve a workflow run for pull requests from
 // forks on the `pull_request_target` event in the Web UI. This is because
@@ -71,24 +71,28 @@ func (c *Config) CheckAndSetDefaults() error {
 // To work around this, this method is being called to check the comments of the
 // pull request in the current context for permission from a repository owner
 // to run the rest of the workflow.
-func (c *Bot) HasWorkflowApproval(ctx context.Context, commentID int64) error {
+func (c *Bot) HasWorkflowRunApproval(ctx context.Context) error {
 	pr := c.Environment.Metadata
 	if c.Environment.IsInternal(pr.Author) {
 		return nil
 	}
 	log.Println("Checking comments...")
 	fmt.Printf("%+v", pr)
-	comments, _, err := c.Environment.Client.PullRequests.GetComment(ctx,
+	comments, _, err := c.Environment.Client.PullRequests.ListComments(ctx,
 		pr.RepoOwner,
 		pr.RepoName,
-		commentID,
+		pr.Number,
+		&github.PullRequestListCommentsOptions{},
 	)
 	if err != nil {
 		return trace.Wrap(err)
 	}
+	fmt.Printf("%+v", comments)
 	log.Println("Ranging over comments...")
-	if ok := c.commentPermitsRun(comments); ok {
-		return nil
+	for _, comment := range comments {
+		if ok := c.commentPermitsRun(comment); ok {
+			return nil
+		}
 	}
 	return trace.BadParameter("workflow runs have not been approved for this pull request")
 }
@@ -105,7 +109,6 @@ func (c *Bot) commentPermitsRun(comment *github.PullRequestComment) bool {
 		log.Println("commit doesn't contain most recent commit")
 		return false
 	}
-
 	if !strings.Contains(*comment.Body, ci.RUNCI) {
 		log.Println("body does not contain run ci")
 
