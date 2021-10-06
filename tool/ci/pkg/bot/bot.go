@@ -87,10 +87,11 @@ func (c *Bot) HasWorkflowRunApproval(ctx context.Context) error {
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	fmt.Printf("%+v", comments)
+	fmt.Printf("comments ----> %+v", comments)
 	log.Println("Ranging over comments...")
 	for _, comment := range comments {
 		if ok := c.commentPermitsRun(comment); ok {
+			fmt.Println(*comment.Body)
 			return nil
 		}
 	}
