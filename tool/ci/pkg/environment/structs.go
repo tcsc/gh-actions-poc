@@ -23,11 +23,28 @@ type PullRequestEvent struct {
 	Repository  Repository `json:"repository"`
 }
 
+type NewPullRequest struct {
+	PullRequest NPR         `json:"pull_request"`
+}
+
+type NPR struct {
+	Number int `json:"number"`
+}
+
 // ReviewEvent contains metadata about the pull request
 // review (used for the pull request review event)
 type ReviewEvent struct {
 	Review      Review      `json:"review"`
 	Repository  Repository  `json:"repository"`
+	PullRequest PullRequest `json:"pull_request"`
+}
+
+type PRCommentEvent struct {
+	Comment Comment `json:"issue"`
+}
+
+// Comment contains information amount the pull request comment. 
+type Comment struct {
 	PullRequest PullRequest `json:"pull_request"`
 }
 
@@ -54,6 +71,7 @@ type PullRequest struct {
 	Number int  `json:"number"`
 	Head   Head `json:"head"`
 	Base   Base `json:"base"`
+	URL string `json:"url"`
 }
 
 // Base contains the base branch commit SHA

@@ -64,9 +64,6 @@ type Metadata struct {
 	HeadSHA string
 	// BaseSHA is the commit sha of the base branch.
 	BaseSHA string
-	// Reviewer is the reviewer's Github username.
-	// Only used for pull request review events.
-	Reviewer string
 	// BranchName is the name of the branch the author
 	// is trying to merge in.
 	BranchName string
@@ -108,7 +105,7 @@ func New(c Config) (*PullRequestEnvironment, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	pr, err := GetMetadata(c.EventPath)
+	pr, err := GetMetadata(c.Context, c.EventPath, c.Client)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -181,14 +178,17 @@ func (e *PullRequestEnvironment) IsInternal(author string) bool {
 }
 
 // GetMetadata gets the pull request metadata in the current context.
-func GetMetadata(path string) (*Metadata, error) {
+func GetMetadata(ctx context.Context, path string, clt *github.Client) (*Metadata, error) {
 	var actionType action
+	var newPullRequest NewPullRequest
+	var body []byte
+
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer file.Close()
-	body, err := ioutil.ReadAll(file)
+	body, err = ioutil.ReadAll(file)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -196,49 +196,51 @@ func GetMetadata(path string) (*Metadata, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	fmt.Println(actionType.Action, "~~~~~~~~~~~~~~~~~~~~~~~")
 
-	return getMetadata(body, actionType.Action)
+	if actionType.Action != ci.Created {
+		err = json.Unmarshal(body, &newPullRequest)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+	} else {
+		var comment PRCommentEvent
+		err = json.Unmarshal(body, &comment)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		newPullRequest = NewPullRequest{
+			PullRequest: NPR{
+				Number: comment.Comment.PullRequest.Number,
+			},
+		}
+	}
+
+	pr, _, err := clt.PullRequests.Get(ctx,
+		"gravitational",
+		"gh-actions-poc",
+		newPullRequest.PullRequest.Number)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	// Checking if action type is of type created a type of PR comment.
+	// The payload of the comment event does not contain all the pull request metadata,
+	// however it does contain the pull request url of where the comment is at.
+	// The work around is checking if the event is a comment event and getting the payload
+	// through the github API
+
+	return getMetadata(pr)
 }
 
-func getMetadata(body []byte, action string) (*Metadata, error) {
-	var pr *Metadata
-
-	switch action {
-	case ci.Synchronize:
-		var push PushEvent
-		err := json.Unmarshal(body, &push)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		pr, err = push.toMetadata()
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-	case ci.Assigned, ci.Opened, ci.Reopened, ci.Ready:
-		var pull PullRequestEvent
-		err := json.Unmarshal(body, &pull)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		pr, err = pull.toMetadata()
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-	case ci.Submitted, ci.Created:
-		var rev ReviewEvent
-		err := json.Unmarshal(body, &rev)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		pr, err = rev.toMetadata()
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, trace.BadParameter("unknown action %s", action)
-	}
-	return pr, nil
+func getMetadata(pr *github.PullRequest) (*Metadata, error) {
+	fmt.Println(*pr.Head.Ref)
+	return &Metadata{
+		Author:     *pr.User.Login,
+		RepoOwner:  *pr.Base.Repo.Owner.Login,
+		RepoName:   *pr.Base.Repo.Name,
+		BaseSHA:    *pr.Base.SHA,
+		HeadSHA:    *pr.Head.SHA,
+		BranchName: *pr.Head.Ref,
+	}, nil
 }
 
 func (r *ReviewEvent) toMetadata() (*Metadata, error) {
@@ -258,7 +260,6 @@ func (r *ReviewEvent) toMetadata() (*Metadata, error) {
 	if r.Review.User.Login == "" {
 		return &Metadata{}, trace.BadParameter("missing reviewer username")
 	}
-	pr.Reviewer = r.Review.User.Login
 	return pr, nil
 }
 
@@ -304,12 +305,6 @@ func validateData(num int, login, owner, repoName, headSHA, baseSHA, branchName,
 		return &Metadata{}, trace.BadParameter("missing base commit sha")
 	case branchName == "":
 		return &Metadata{}, trace.BadParameter("missing branch name")
-	case branchName == "":
-		return &Metadata{}, trace.BadParameter("missing branch name")
-	case headFullName == "":
-		return &Metadata{}, trace.BadParameter("missing head repository's full name")
-	case baseFullName == "":
-		return &Metadata{}, trace.BadParameter("missing base repository's full name")
 	}
 
 	return &Metadata{Number: num,

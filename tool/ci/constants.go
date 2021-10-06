@@ -60,7 +60,7 @@ const (
 	// Submitted is an event type that is triggered when a pull request review is submitted.
 	Submitted = "submitted"
 
-	// Created is an event type that is triggered when a pull request review is created.
+	// Created is an event type that is triggered when a comment is made on a pull request.
 	Created = "created"
 
 	// Owner is a type of author association to a repository 
@@ -71,5 +71,5 @@ const (
 	RUNCI = "run ci"
 
 	// check-run-approved
-	
+	PullRequestComment = "pull_request_comment"
 )
