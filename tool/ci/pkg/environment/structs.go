@@ -21,7 +21,7 @@ type PRComment struct {
 
 // Comment contains information amount the pull request comment.
 type Comment struct {
-	Number Num
+	Number Num `json:"number"`
 }
 
 // action represents the current action
