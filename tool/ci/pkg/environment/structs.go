@@ -16,12 +16,12 @@ type Number struct {
 }
 
 type PRComment struct {
-	Comment Comment `json:"issue"`
+	Comment Issue `json:"issue"`
 }
 
-// Comment contains information amount the pull request comment.
-type Comment struct {
-	Number Number `json:"number"`
+// Issue contains information amount the pull request comment.
+type Issue struct {
+	Number Number
 }
 
 // action represents the current action

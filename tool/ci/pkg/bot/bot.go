@@ -177,6 +177,9 @@ func (c *Bot) DismissStaleWorkflowRuns(ctx context.Context, owner, repoName, bra
 
 func (c *Bot) ReRunWorkflows(ctx context.Context) error {
 	pr := c.Environment.Metadata
+	if c.Environment.IsInternal(pr.Author) {
+		return nil 
+	}
 	// get both workflow files
 	checkWorkflow, err := c.getWorkflow(ctx, pr.RepoOwner, pr.RepoName, ci.CheckWorkflow)
 	if err != nil {
