@@ -80,6 +80,7 @@ func main() {
 		}
 		log.Println("Stale workflow run removal completed.")
 	case "check-run-approval":
+		log.Println("Checking for run approval.")
 		bot, err := constructBot(ctx, client, *reviewers)
 		if err != nil {
 			log.Fatal(err)

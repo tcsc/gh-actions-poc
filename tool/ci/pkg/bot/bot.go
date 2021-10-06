@@ -130,7 +130,7 @@ func (c *Bot) getMostRecentCommitCreatedTime(ctx context.Context) (time.Time, er
 	if err != nil {
 		return time.Time{}, trace.Wrap(err)
 	}
-	return commit.Author.CreatedAt.Time, nil
+	return *commit.Commit.Committer.Date, nil
 }
 
 // DimissStaleWorkflowRunsForExternalContributors dismisses stale workflow runs for external contributors.
@@ -140,7 +140,7 @@ func (c *Bot) DimissStaleWorkflowRunsForExternalContributors(ctx context.Context
 	clt := c.GithubClient.Client
 	pullReqs, _, err := clt.PullRequests.List(ctx, repoOwner, repoName, &github.PullRequestListOptions{State: ci.Open})
 	if err != nil {
-		return err
+		return trace.Wrap(err)
 	}
 	for _, pull := range pullReqs {
 		err := c.DismissStaleWorkflowRuns(ctx, *pull.Base.User.Login, *pull.Base.Repo.Name, *pull.Head.Ref)
