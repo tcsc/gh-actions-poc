@@ -117,7 +117,7 @@ func (c *Bot) commentPermitsRun(comment *github.PullRequestComment) bool {
 	admins := c.Environment.GetReviewersForAuthor("")
 	log.Printf("admins %+v", admins)
 	for _, admin := range admins {
-		if *comment.AuthorAssociation == ci.Owner && *comment.User.Login == admin {
+		if /* *comment.AuthorAssociation == ci.Owner && */ *comment.User.Login == admin {
 			return true
 		}
 	}
