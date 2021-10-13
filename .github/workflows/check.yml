@@ -12,8 +12,8 @@ on:
     types: [assigned, opened, reopened, ready_for_review, synchronize]
 
 permissions:  
-    pull-requests: read
     actions: write
+    pull-requests: write
     checks: none
     contents: none
     deployments: none
