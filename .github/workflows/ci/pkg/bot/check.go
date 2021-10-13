@@ -1,10 +1,12 @@
 package bot
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -17,19 +19,6 @@ import (
 
 // Check checks if all the reviewers have approved the pull request in the current context.
 func (c *Bot) Check(ctx context.Context) error {
-	pr := c.Environment.Metadata
-	// Remove any stale workflow runs. As only the current workflow run should
-	// be shown because it is the workflow that reflects the correct state of the pull.
-	//
-	// Note: This is run for all workflow runs triggered by an event from an internal contributor,
-	// but has to be run again in cron workflow because workflows triggered by external contributors do not
-	// grant the Github actions token the correct permissions to dismiss workflow runs.
-	if c.Environment.IsInternal(pr.Author) {
-		err := c.DismissStaleWorkflowRuns(ctx, pr.RepoOwner, pr.RepoName, pr.BranchName)
-		if err != nil {
-			return trace.Wrap(err)
-		}
-	}
 	// Check if the assigned reviewers have approved this PR.
 	err := c.check(ctx)
 	if err != nil {
@@ -41,6 +30,38 @@ func (c *Bot) Check(ctx context.Context) error {
 // check checks to see if all the required reviewers have approved and invalidates
 // approvals for external contributors if a new commit is pushed
 func (c *Bot) check(ctx context.Context) error {
+	pr := c.Environment.Metadata
+	if c.Environment.IsInternal(pr.Author) {
+		return c.checkInternal(ctx)
+	}
+	return c.checkExternal(ctx)
+}
+
+func (c *Bot) checkInternal(ctx context.Context) error {
+	pr := c.Environment.Metadata
+	// Remove any stale workflow runs. As only the current workflow run should
+	// be shown because it is the workflow that reflects the correct state of the pull request.
+	//
+	// Note: This is run for all workflow runs triggered by an event from an internal contributor,
+	// but has to be run again in cron workflow because workflows triggered by external contributors do not
+	// grant the Github actions token the correct permissions to dismiss workflow runs.
+	err := c.DismissStaleWorkflowRuns(ctx, pr.RepoOwner, pr.RepoName, pr.BranchName)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	mostRecentReviews, err := c.getMostRecentReviews(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	log.Printf("Checking if %v has approvals from the required reviewers %+v", pr.Author, c.Environment.GetReviewersForAuthor(pr.Author))
+	err = hasRequiredApprovals(mostRecentReviews, c.Environment.GetReviewersForAuthor(pr.Author))
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
+func (c *Bot) checkExternal(ctx context.Context) error {
 	var obsoleteReviews []review
 	var validReviews []review
 
@@ -49,24 +70,17 @@ func (c *Bot) check(ctx context.Context) error {
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	if !c.Environment.IsInternal(pr.Author) {
-		// External contributions require tighter scrutiny than team
-		// contributions. As such reviews from previous pushes must
-		// not carry over to when new changes are added. Github does
-		// not do this automatically, so we must dismiss the reviews
-		// manually.
-		if err = c.isGithubCommit(ctx); err == nil {
-			// new commit is a special github-authored merge (?) and
-			// we don't need to invalidate the reviews for that.
-			// No more work to be done here.
-		} else {
-
-			validReviews, obsoleteReviews = splitReviews(pr.HeadSHA, mostRecentReviews)
-			msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
-			err = c.invalidateApprovals(ctx, msg, obsoleteReviews)
-			if err != nil {
-				return trace.Wrap(err)
-			}
+	validReviews, obsoleteReviews = splitReviews(pr.HeadSHA, mostRecentReviews)
+	// External contributions require tighter scrutiny than team
+	// contributions. As such reviews from previous pushes must
+	// not carry over to when new changes are added. Github does
+	// not do this automatically, so we must dismiss the reviews
+	// manually.
+	if err = c.isGithubCommit(ctx); err != nil {
+		msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
+		err = c.invalidateApprovals(ctx, msg, obsoleteReviews)
+		if err != nil {
+			return trace.Wrap(err)
 		}
 	}
 	log.Printf("Checking if %v has approvals from the required reviewers %+v", pr.Author, c.Environment.GetReviewersForAuthor(pr.Author))
@@ -95,7 +109,6 @@ func hasRequiredApprovals(mostRecentReviews []review, required []string) error {
 	if len(mostRecentReviews) == 0 {
 		return trace.BadParameter("pull request has no approvals")
 	}
-
 	var waitingOnApprovalsFrom []string
 	for _, requiredReviewer := range required {
 		ok := hasApproved(requiredReviewer, mostRecentReviews)
@@ -103,18 +116,8 @@ func hasRequiredApprovals(mostRecentReviews []review, required []string) error {
 			waitingOnApprovalsFrom = append(waitingOnApprovalsFrom, requiredReviewer)
 		}
 	}
-	switch {
-	case len(waitingOnApprovalsFrom) == 1:
-		return trace.BadParameter(fmt.Sprintf("required reviewers have not yet approved, waiting on an approval from %s",
-			strings.Join(waitingOnApprovalsFrom, "")))
-	case len(waitingOnApprovalsFrom) == 2:
-		return trace.BadParameter(fmt.Sprintf("required reviewers have not yet approved, waiting for approvals from %s",
-			strings.Join(waitingOnApprovalsFrom, " and ")))
-	case len(waitingOnApprovalsFrom) > 2:
-		lastReviewer := waitingOnApprovalsFrom[len(waitingOnApprovalsFrom)-1]
-		waitingOnApprovalsFrom = waitingOnApprovalsFrom[:len(waitingOnApprovalsFrom)-1]
-		return trace.BadParameter(fmt.Sprintf("required reviewers have not yet approved, waiting for approvals from %s, and %s",
-			strings.Join(waitingOnApprovalsFrom, ", "), lastReviewer))
+	if len(waitingOnApprovalsFrom) > 0 {
+		return trace.BadParameter("required reviewers have not yet approved, waiting on approval(s) from %v", waitingOnApprovalsFrom)
 	}
 	return nil
 }
@@ -169,6 +172,16 @@ func checkReviewFields(review *github.PullRequestReview) error {
 	case review.User.Login == nil:
 		return trace.Errorf("reviewer User.Login is nil. review: %+v", review)
 	}
+
+	if err := validateField(*review.State); err != nil {
+		return trace.Errorf("review ID err: %v", err)
+	}
+	if err := validateField(*review.CommitID); err != nil {
+		return trace.Errorf("commit ID err: %v", err)
+	}
+	if err := validateField(*review.User.Login); err != nil {
+		return trace.Errorf("user login err: %v", err)
+	}
 	return nil
 }
 
@@ -207,12 +220,12 @@ func hasApproved(reviewer string, reviews []review) bool {
 
 // dimissMessage returns the dimiss message when a review is dismissed
 func dismissMessage(pr *environment.Metadata, required []string) string {
-	var buffer bytes.Buffer
-	buffer.WriteString("new commit pushed, please re-review ")
+	var sb strings.Builder
+	sb.WriteString("new commit pushed, please re-review ")
 	for _, reviewer := range required {
-		fmt.Fprintf(&buffer, "@%v", reviewer)
+		sb.WriteString(fmt.Sprintf("@%s", reviewer))
 	}
-	return buffer.String()
+	return sb.String()
 }
 
 // isGithubCommit verfies GitHub is the commit author and that the commit is empty.
@@ -220,36 +233,89 @@ func dismissMessage(pr *environment.Metadata, required []string) string {
 // pull request's reviews should be invalidated. If a commit is signed by Github and is empty
 // there is no need to invalidate commits because the branch is just being updated.
 func (c *Bot) isGithubCommit(ctx context.Context) error {
+	commit, err := c.getValidCommit(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	signature := *commit.Commit.Verification.Signature
+	payloadData := *commit.Commit.Verification.Payload
+
+	signatureFileName, err := createAndWriteTempFile(ci.Signature, signature)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	defer os.Remove(signatureFileName)
+
+	payloadFileName, err := createAndWriteTempFile(ci.Payload, payloadData)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	defer os.Remove(payloadFileName)
+
+	// GPG verification command requires the signature as the first argument
+	// Runner must have gpg (GnuPG) installed.
+	cmd := exec.Command("gpg", "--verify", signatureFileName, payloadFileName)
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return trace.BadParameter("commit is not verified and/or is not signed by GitHub")
+		}
+		return trace.Wrap(err)
+	}
+	return c.hasFileChange(ctx)
+}
+
+// hasFileChange compares all of the files that have changes in the PR to the one at the current commit.
+// This is used for comparing files when Github makes a auto update branch commit to ensure the merge
+// didn't result in changes to the files already in the PR.
+func (c *Bot) hasFileChange(ctx context.Context) error {
 	pr := c.Environment.Metadata
-	comparison, _, err := c.Environment.Client.Repositories.CompareCommits(
-		ctx,
-		pr.RepoOwner,
-		pr.RepoName,
-		pr.BaseSHA,
-		pr.HeadSHA,
-	)
+	clt := c.Environment.Client
+	prFiles, _, err := clt.PullRequests.ListFiles(ctx, pr.RepoOwner, pr.RepoName, pr.Number, &github.ListOptions{})
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	if len(comparison.Files) != 0 {
-		return trace.BadParameter("detected file change")
-	}
-	commit, _, err := c.Environment.Client.Repositories.GetCommit(ctx, pr.RepoOwner, pr.RepoName, pr.HeadSHA)
+	headCommit, _, err := clt.Repositories.GetCommit(ctx, pr.RepoOwner, pr.RepoName, pr.HeadSHA)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	verification := commit.Commit.Verification
-	if verification != nil {
-		if verification.Payload != nil && verification.Verified != nil {
-			payload := *verification.Payload
-			// If commit is empty (no file changes) and the commit is signed by Github,
-			// there is no need to invalidate the commit.
-			if strings.Contains(payload, ci.GithubCommit) && *verification.Verified {
-				return nil
+	for _, headFile := range headCommit.Files {
+		for _, prFile := range prFiles {
+			if *headFile.Filename == *prFile.Filename {
+				return trace.BadParameter("detected file change")
 			}
 		}
 	}
-	return trace.BadParameter("commit is not verified and/or is not signed by GitHub")
+	return nil
+}
+
+// getValidCommit returns a valid repository commit to perform GPG signature verification on.
+// A valid commit is one that has a signature and a payload.
+func (c *Bot) getValidCommit(ctx context.Context) (*github.RepositoryCommit, error) {
+	pr := c.Environment.Metadata
+	commit, _, err := c.Environment.Client.Repositories.GetCommit(ctx, pr.RepoOwner, pr.RepoName, pr.HeadSHA)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	if commit.Commit.Verification.Signature == nil || commit.Commit.Verification.Payload == nil {
+		return nil, trace.BadParameter("commit is not signed")
+	}
+	return commit, nil
+}
+
+// createAndWriteTempFile creates a temp file and writes to it.
+func createAndWriteTempFile(prefix, data string) (fileName string, err error) {
+	file, err := ioutil.TempFile(os.TempDir(), prefix)
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	contents := []byte(data)
+	if _, err = file.Write(contents); err != nil {
+		return "", trace.Wrap(err)
+	}
+	if err := file.Close(); err != nil {
+		return "", trace.Wrap(err)
+	}
+	return file.Name(), nil
 }
 
 // invalidateApprovals dismisses all approved reviews on a pull request.

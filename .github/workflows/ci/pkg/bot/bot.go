@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"path"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/gravitational/gh-actions-poc/.github/workflows/ci"
 	"github.com/gravitational/gh-actions-poc/.github/workflows/ci/pkg/environment"
@@ -61,14 +64,25 @@ func (c *Config) CheckAndSetDefaults() error {
 // DimissStaleWorkflowRunsForExternalContributors dismisses stale workflow runs for external contributors.
 // Dismissing stale workflows for external contributors is done on a cron job and checks the whole repo for
 // stale runs on PRs.
-func (c *Bot) DimissStaleWorkflowRunsForExternalContributors(ctx context.Context, repoOwner, repoName string) error {
+func (c *Bot) DimissStaleWorkflowRunsForExternalContributors(ctx context.Context) error {
 	clt := c.GithubClient.Client
+	// Get the repository name and owner, on the Github Actions runner the
+	// GITHUB_REPOSITORY environment variable is in the format of
+	// repo-owner/repo-name.
+	repoOwner, repoName, err := getRepositoryMetadata()
+	if err != nil {
+		return trace.Wrap(err)
+	}
 	pullReqs, _, err := clt.PullRequests.List(ctx, repoOwner, repoName, &github.PullRequestListOptions{State: ci.Open})
 	if err != nil {
-		return err
+		return trace.Wrap(err)
 	}
 	for _, pull := range pullReqs {
-		err := c.DismissStaleWorkflowRuns(ctx, *pull.Base.User.Login, *pull.Base.Repo.Name, *pull.Head.Ref)
+		err := validatePullRequestFields(pull)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		err = c.DismissStaleWorkflowRuns(ctx, *pull.Base.User.Login, *pull.Base.Repo.Name, *pull.Head.Ref)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -117,6 +131,18 @@ func (c *Bot) deleteRuns(ctx context.Context, owner, repoName string, runs []*gi
 		}
 	}
 	return nil
+}
+
+func getRepositoryMetadata() (repositoryOwner string, repositoryName string, err error) {
+	repository := os.Getenv(ci.GithubRepository)
+	if repository == "" {
+		return "", "", trace.BadParameter("environment variable GITHUB_REPOSITORY is not set")
+	}
+	metadata := strings.Split(repository, "/")
+	if len(metadata) != 2 {
+		return "", "", trace.BadParameter("environment variable GITHUB_REPOSITORY is not in the correct format,\n the valid format is '<repo owner>/<repo name>'")
+	}
+	return metadata[0], metadata[1], nil
 }
 
 func (c *Bot) findStaleWorkflowRuns(ctx context.Context, owner, repoName, branchName string, workflowID int64) ([]*github.WorkflowRun, error) {
@@ -170,6 +196,48 @@ func (c *Bot) deleteRun(ctx context.Context, owner, repo string, runID int64) er
 	_, err = clt.Do(ctx, req, nil)
 	if err != nil {
 		return trace.Wrap(err)
+	}
+	return nil
+}
+
+// validatePullRequestFields checks that pull request fields needed for
+// dismissing workflow runs are not nil.
+func validatePullRequestFields(pr *github.PullRequest) error {
+	switch {
+	case pr.Base == nil:
+		return trace.BadParameter("missing base branch")
+	case pr.Base.User == nil:
+		return trace.BadParameter("missing base branch user")
+	case pr.Base.User.Login == nil:
+		return trace.BadParameter("missing repository owner")
+	case pr.Base.Repo == nil:
+		return trace.BadParameter("missing base repository")
+	case pr.Base.Repo.Name == nil:
+		return trace.BadParameter("missing repository name")
+	case pr.Head == nil:
+		return trace.BadParameter("missing head branch")
+	case pr.Head.Ref == nil:
+		return trace.BadParameter("missing branch name")
+	}
+	if err := validateField(*pr.Base.User.Login); err != nil {
+		return trace.Errorf("user login err: %v", err)
+	}
+	if err := validateField(*pr.Base.Repo.Name); err != nil {
+		return trace.Errorf("repository name err: %v", err)
+	}
+	if err := validateField(*pr.Head.Ref); err != nil {
+		return trace.Errorf("branch name err: %v", err)
+	}
+	return nil
+}
+
+func validateField(field string) error {
+	// Only allow strings that contain alphanumeric characters,
+	// underscores, and dashes.
+	reg := regexp.MustCompile(`^[\da-zA-Z-_]+$`)
+	found := reg.MatchString(field)
+	if !found {
+		return trace.BadParameter("invalid field, %s contains illegal characters or is empty", field)
 	}
 	return nil
 }

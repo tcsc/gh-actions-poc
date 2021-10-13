@@ -5,7 +5,6 @@ import (
 	"flag"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gravitational/gh-actions-poc/.github/workflows/ci"
@@ -18,27 +17,35 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const usage = "The following subcommands are supported:\n" +
-	"\tassign-reviewers \n\t assigns reviewers to a pull request.\n" +
-	"\tcheck-reviewers \n\t checks pull request for required reviewers.\n" +
-	"\tdismiss-runs \n\t dismisses stale workflow runs for external contributors.\n"
+const (
+	usage = "The following subcommands are supported:\n" +
+		"\tassign-reviewers \n\t assigns reviewers to a pull request.\n" +
+		"\tcheck-reviewers \n\t checks pull request for required reviewers.\n" +
+		"\tdismiss-runs \n\t dismisses stale workflow runs for external contributors.\n"
+
+	reviewersHelp = `reviewers is a string representing a json object that maps authors to 
+	required reviewers for that author. example: "{\"author1\": [\"reviewer0\", \"reviewer1\"], \"author2\": 
+	[\"reviewer2\", \"reviewer3\"],\"*\": [\"default-reviewer0\", \"default-reviewer1\"]}"`
+
+	workflowRunTimeout = time.Minute
+)
 
 func main() {
 	var token = flag.String("token", "", "token is the Github authentication token.")
-	var reviewers = flag.String("reviewers", "", "reviewers is a string representing a json object that maps authors to required reviewers for that author.")
+	var reviewers = flag.String("reviewers", "", reviewersHelp)
 	flag.Parse()
 
 	if len(os.Args) < 2 {
 		log.Fatalf("Subcommand required. %s\n", usage)
 	}
 	subcommand := os.Args[len(os.Args)-1]
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
+	ctx, cancel := context.WithTimeout(context.Background(), workflowRunTimeout)
 	defer cancel()
 
 	client := makeGithubClient(ctx, *token)
 	switch subcommand {
 	case ci.AssignSubcommand:
-		log.Println("Assigning reviewers")
+		log.Println("Assigning reviewers.")
 		bot, err := constructBot(ctx, client, *reviewers)
 		if err != nil {
 			log.Fatal(err)
@@ -61,21 +68,14 @@ func main() {
 		log.Print("Check completed.")
 	case ci.Dismiss:
 		log.Println("Dismissing stale runs.")
-		// Get the repository name and owner, on the Github Actions runner the
-		// GITHUB_REPOSITORY environment variable is in the format of
-		// repo-owner/repo-name.
-		repoOwner, repoName, err := getRepositoryMetadata()
-		if err != nil {
-			log.Fatal(err)
-		}
 		// Constructing Bot without PullRequestEnvironment.
-		// Dismiss runs does not need PullRequestEnvironment because it
+		// Dismiss runs does not need PullRequestEnvironment because PullRequestEnvironment is only
 		// is used for pull request or PR adjacent (PR reviews, pushes to PRs, PR opening, reopening, etc.) events.
 		bot, err := bot.New(bots.Config{GithubClient: client})
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = bot.DimissStaleWorkflowRunsForExternalContributors(ctx, repoOwner, repoName)
+		err = bot.DimissStaleWorkflowRunsForExternalContributors(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -86,30 +86,16 @@ func main() {
 
 }
 
-func getRepositoryMetadata() (repositoryOwner string, repositoryName string, err error) {
-	repository := os.Getenv(ci.GithubRepository)
-	if repository == "" {
-		return "", "", trace.BadParameter("environment variable GITHUB_REPOSITORY is not set")
-	}
-	metadata := strings.Split(repository, "/")
-	if len(metadata) != 2 {
-		return "", "", trace.BadParameter("environment variable GITHUB_REPOSITORY is not in the correct format,\n the valid format is '<repo owner>/<repo name>'")
-	}
-	return metadata[0], metadata[1], nil
-}
-
 func constructBot(ctx context.Context, clt *github.Client, reviewers string) (*bots.Bot, error) {
-	path := os.Getenv(ci.GithubEventPath)
 	env, err := environment.New(environment.Config{Client: clt,
 		Reviewers: reviewers,
-		EventPath: path,
 		Context:   ctx,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	bot, err := bots.New(bots.Config{Environment: env, GithubClient: clt})
+	bot, err := bots.New(bots.Config{Environment: env})
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
