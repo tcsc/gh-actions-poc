@@ -31,6 +31,12 @@ func (c *Bot) Check(ctx context.Context) error {
 // approvals for external contributors if a new commit is pushed
 func (c *Bot) check(ctx context.Context) error {
 	pr := c.Environment.Metadata
+	// Remove any stale workflow runs. As only the current workflow run should
+	// be shown because it is the workflow that reflects the correct state of the pull request.
+	err := c.DismissStaleWorkflowRuns(ctx, pr.RepoOwner, pr.RepoName, pr.BranchName)
+	if err != nil {
+		return trace.Wrap(err)
+	}
 	if c.Environment.IsInternal(pr.Author) {
 		return c.checkInternal(ctx)
 	}
@@ -39,16 +45,6 @@ func (c *Bot) check(ctx context.Context) error {
 
 func (c *Bot) checkInternal(ctx context.Context) error {
 	pr := c.Environment.Metadata
-	// Remove any stale workflow runs. As only the current workflow run should
-	// be shown because it is the workflow that reflects the correct state of the pull request.
-	//
-	// Note: This is run for all workflow runs triggered by an event from an internal contributor,
-	// but has to be run again in cron workflow because workflows triggered by external contributors do not
-	// grant the Github actions token the correct permissions to dismiss workflow runs.
-	err := c.DismissStaleWorkflowRuns(ctx, pr.RepoOwner, pr.RepoName, pr.BranchName)
-	if err != nil {
-		return trace.Wrap(err)
-	}
 	mostRecentReviews, err := c.getMostRecentReviews(ctx)
 	if err != nil {
 		return trace.Wrap(err)

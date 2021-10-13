@@ -8,16 +8,14 @@ import (
 	"github.com/google/go-github/v37/github"
 	"github.com/stretchr/testify/require"
 )
-
 func TestNewBot(t *testing.T) {
-	clt := github.NewClient(nil)
 	tests := []struct {
 		cfg      Config
 		checkErr require.ErrorAssertionFunc
 		expected *Bot
 	}{
 		{
-			cfg:      Config{Environment: &environment.PullRequestEnvironment{}, GithubClient: clt},
+			cfg:      Config{Environment: &environment.PullRequestEnvironment{}},
 			checkErr: require.NoError,
 		},
 		{

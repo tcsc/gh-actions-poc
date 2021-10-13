@@ -66,20 +66,6 @@ func main() {
 			log.Fatal(err)
 		}
 		log.Print("Check completed.")
-	case ci.Dismiss:
-		log.Println("Dismissing stale runs.")
-		// Constructing Bot without PullRequestEnvironment.
-		// Dismiss runs does not need PullRequestEnvironment because PullRequestEnvironment is only
-		// is used for pull request or PR adjacent (PR reviews, pushes to PRs, PR opening, reopening, etc.) events.
-		bot, err := bot.New(bots.Config{GithubClient: client})
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = bot.DimissStaleWorkflowRunsForExternalContributors(ctx)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println("Stale workflow run removal completed.")
 	default:
 		log.Fatalf("Unknown subcommand: %v.\n%s", subcommand, usage)
 	}
@@ -95,7 +81,7 @@ func constructBot(ctx context.Context, clt *github.Client, reviewers string) (*b
 		return nil, trace.Wrap(err)
 	}
 
-	bot, err := bots.New(bots.Config{Environment: env, GithubClient: clt})
+	bot, err := bots.New(bots.Config{Environment: env})
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

@@ -19,73 +19,29 @@ import (
 
 // Config is used to configure Bot
 type Config struct {
-	Environment  *environment.PullRequestEnvironment
-	GithubClient *github.Client
+	Environment *environment.PullRequestEnvironment
 }
 
 // Bot assigns reviewers and checks assigned reviewers for a pull request
 type Bot struct {
-	Environment  *environment.PullRequestEnvironment
-	GithubClient GithubClient
-}
-
-// GithubClient is a wrapper around the Github client
-// to be used on methods that require the client, but don't
-// don't need the full functionality of Bot with
-// Environment.
-type GithubClient struct {
-	Client *github.Client
+	Environment *environment.PullRequestEnvironment
 }
 
 // New returns a new instance of  Bot
 func New(c Config) (*Bot, error) {
-	var bot Bot
 	err := c.CheckAndSetDefaults()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	if c.Environment != nil {
-		bot.Environment = c.Environment
-	}
-	bot.GithubClient = GithubClient{
-		Client: c.GithubClient,
-	}
-	return &bot, nil
+	return &Bot{
+		Environment: c.Environment,
+	}, nil
 }
 
 // CheckAndSetDefaults verifies configuration and sets defaults
 func (c *Config) CheckAndSetDefaults() error {
-	if c.GithubClient == nil {
-		return trace.BadParameter("missing parameter GithubClient")
-	}
-	return nil
-}
-
-// DimissStaleWorkflowRunsForExternalContributors dismisses stale workflow runs for external contributors.
-// Dismissing stale workflows for external contributors is done on a cron job and checks the whole repo for
-// stale runs on PRs.
-func (c *Bot) DimissStaleWorkflowRunsForExternalContributors(ctx context.Context) error {
-	clt := c.GithubClient.Client
-	// Get the repository name and owner, on the Github Actions runner the
-	// GITHUB_REPOSITORY environment variable is in the format of
-	// repo-owner/repo-name.
-	repoOwner, repoName, err := getRepositoryMetadata()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	pullReqs, _, err := clt.PullRequests.List(ctx, repoOwner, repoName, &github.PullRequestListOptions{State: ci.Open})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	for _, pull := range pullReqs {
-		err := validatePullRequestFields(pull)
-		if err != nil {
-			return trace.Wrap(err)
-		}
-		err = c.DismissStaleWorkflowRuns(ctx, *pull.Base.User.Login, *pull.Base.Repo.Name, *pull.Head.Ref)
-		if err != nil {
-			return trace.Wrap(err)
-		}
+	if c.Environment == nil {
+		return trace.BadParameter("missing parameter Environment")
 	}
 	return nil
 }
@@ -133,20 +89,8 @@ func (c *Bot) deleteRuns(ctx context.Context, owner, repoName string, runs []*gi
 	return nil
 }
 
-func getRepositoryMetadata() (repositoryOwner string, repositoryName string, err error) {
-	repository := os.Getenv(ci.GithubRepository)
-	if repository == "" {
-		return "", "", trace.BadParameter("environment variable GITHUB_REPOSITORY is not set")
-	}
-	metadata := strings.Split(repository, "/")
-	if len(metadata) != 2 {
-		return "", "", trace.BadParameter("environment variable GITHUB_REPOSITORY is not in the correct format,\n the valid format is '<repo owner>/<repo name>'")
-	}
-	return metadata[0], metadata[1], nil
-}
-
 func (c *Bot) findStaleWorkflowRuns(ctx context.Context, owner, repoName, branchName string, workflowID int64) ([]*github.WorkflowRun, error) {
-	clt := c.GithubClient.Client
+	clt := c.Environment.Client
 	list, _, err := clt.Actions.ListWorkflowRunsByID(ctx, owner, repoName, workflowID, &github.ListWorkflowRunsOptions{Branch: branchName})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -156,7 +100,7 @@ func (c *Bot) findStaleWorkflowRuns(ctx context.Context, owner, repoName, branch
 
 // getCheckWorkflow gets the workflow named 'Check'.
 func (c *Bot) getCheckWorkflow(ctx context.Context, owner, repoName string) (*github.Workflow, error) {
-	clt := c.GithubClient.Client
+	clt := c.Environment.Client
 	workflows, _, err := clt.Actions.ListWorkflows(ctx, owner, repoName, &github.ListOptions{})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -180,7 +124,7 @@ const (
 // deleteRun deletes a workflow run.
 // Note: the go-github client library does not support this endpoint.
 func (c *Bot) deleteRun(ctx context.Context, owner, repo string, runID int64) error {
-	clt := c.GithubClient.Client
+	clt := c.Environment.Client
 	// Construct url
 	s := fmt.Sprintf("repos/%s/%s/actions/runs/%v", owner, repo, runID)
 	cleanPath := path.Join("/", s)
