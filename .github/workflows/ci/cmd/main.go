@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gravitational/gh-actions-poc/.github/workflows/ci"
-	"github.com/gravitational/gh-actions-poc/.github/workflows/ci/pkg/bot"
 	bots "github.com/gravitational/gh-actions-poc/.github/workflows/ci/pkg/bot"
 	"github.com/gravitational/gh-actions-poc/.github/workflows/ci/pkg/environment"
 	"github.com/gravitational/trace"

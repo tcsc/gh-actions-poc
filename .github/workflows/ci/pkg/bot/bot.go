@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"path"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/gravitational/gh-actions-poc/.github/workflows/ci"
 	"github.com/gravitational/gh-actions-poc/.github/workflows/ci/pkg/environment"
