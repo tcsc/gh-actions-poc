@@ -1,176 +1,166 @@
 package bot
 
-import (
-	"sort"
-	"testing"
-	"time"
+// func TestApproved(t *testing.T) {
+// 	bot := &Bot{Environment: &environment.PullRequestEnvironment{}}
+// 	pull := &environment.Metadata{Author: "test"}
+// 	tests := []struct {
+// 		botInstance    *Bot
+// 		pr             *environment.Metadata
+// 		required       []string
+// 		currentReviews []review
+// 		desc           string
+// 		checkErr       require.ErrorAssertionFunc
+// 	}{
+// 		{
+// 			botInstance: bot,
+// 			pr:          pull,
+// 			required:    []string{"foo", "bar", "baz"},
+// 			currentReviews: []review{
+// 				{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
+// 				{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
+// 				{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 3},
+// 			},
+// 			desc:     "PR does not have all required approvals",
+// 			checkErr: require.Error,
+// 		},
+// 		{
+// 			botInstance: bot,
 
-	"github.com/gravitational/gh-actions-poc/.github/workflows/ci/pkg/environment"
+// 			pr:       pull,
+// 			required: []string{"foo", "bar", "baz"},
+// 			currentReviews: []review{
+// 				{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
+// 				{name: "bar", status: "APPROVED", commitID: "12ga34", id: 2},
+// 				{name: "baz", status: "APPROVED", commitID: "12ga34", id: 3},
+// 			},
+// 			desc:     "PR has required approvals, commit shas match",
+// 			checkErr: require.NoError,
+// 		},
+// 		{
+// 			botInstance: bot,
+// 			pr:          pull,
+// 			required:    []string{"foo", "bar"},
+// 			currentReviews: []review{
+// 				{name: "foo", status: "APPROVED", commitID: "fe324c", id: 1},
+// 			},
+// 			desc:     "PR does not have all required approvals",
+// 			checkErr: require.Error,
+// 		},
+// 	}
 
-	"github.com/stretchr/testify/require"
-)
+// 	for _, test := range tests {
+// 		t.Run(test.desc, func(t *testing.T) {
+// 			err := hasRequiredApprovals(test.currentReviews, test.required)
+// 			test.checkErr(t, err)
+// 		})
+// 	}
+// }
 
-func TestApproved(t *testing.T) {
-	bot := &Bot{Environment: &environment.PullRequestEnvironment{}}
-	pull := &environment.Metadata{Author: "test"}
-	tests := []struct {
-		botInstance    *Bot
-		pr             *environment.Metadata
-		required       []string
-		currentReviews []review
-		desc           string
-		checkErr       require.ErrorAssertionFunc
-	}{
-		{
-			botInstance: bot,
-			pr:          pull,
-			required:    []string{"foo", "bar", "baz"},
-			currentReviews: []review{
-				{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
-				{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
-				{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 3},
-			},
-			desc:     "PR does not have all required approvals",
-			checkErr: require.Error,
-		},
-		{
-			botInstance: bot,
+// func TestContainsApprovalReview(t *testing.T) {
+// 	reviews := []review{
+// 		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
+// 		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
+// 		{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 1},
+// 	}
+// 	// Has a review but no approval
+// 	ok := hasApproved("bar", reviews)
+// 	require.Equal(t, false, ok)
 
-			pr:       pull,
-			required: []string{"foo", "bar", "baz"},
-			currentReviews: []review{
-				{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
-				{name: "bar", status: "APPROVED", commitID: "12ga34", id: 2},
-				{name: "baz", status: "APPROVED", commitID: "12ga34", id: 3},
-			},
-			desc:     "PR has required approvals, commit shas match",
-			checkErr: require.NoError,
-		},
-		{
-			botInstance: bot,
-			pr:          pull,
-			required:    []string{"foo", "bar"},
-			currentReviews: []review{
-				{name: "foo", status: "APPROVED", commitID: "fe324c", id: 1},
-			},
-			desc:     "PR does not have all required approvals",
-			checkErr: require.Error,
-		},
-	}
+// 	// Does not have revire from reviewer
+// 	ok = hasApproved("car", reviews)
+// 	require.Equal(t, false, ok)
 
-	for _, test := range tests {
-		t.Run(test.desc, func(t *testing.T) {
-			err := hasRequiredApprovals(test.currentReviews, test.required)
-			test.checkErr(t, err)
-		})
-	}
-}
+// 	// Has review and is approved
+// 	ok = hasApproved("foo", reviews)
+// 	require.Equal(t, true, ok)
+// }
 
-func TestContainsApprovalReview(t *testing.T) {
-	reviews := []review{
-		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
-		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
-		{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 1},
-	}
-	// Has a review but no approval
-	ok := hasApproved("bar", reviews)
-	require.Equal(t, false, ok)
+// func TestHasNewCommit(t *testing.T) {
+// 	reviews := []review{
+// 		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
+// 		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
+// 		{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 3},
+// 		{name: "foo", status: "APPROVED", commitID: "fe324c", id: 4},
+// 		{name: "bar", status: "Commented", commitID: "fe324c", id: 5},
+// 	}
+// 	valid, obs := splitReviews("fe324c", reviews)
+// 	expectedValid := []review{
+// 		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
+// 		{name: "foo", status: "APPROVED", commitID: "fe324c", id: 4},
+// 		{name: "bar", status: "Commented", commitID: "fe324c", id: 5},
+// 	}
+// 	expectedObsolete := []review{
+// 		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
+// 		{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 3},
+// 	}
+// 	require.Equal(t, expectedValid, valid)
+// 	require.Equal(t, expectedObsolete, obs)
+// }
 
-	// Does not have revire from reviewer
-	ok = hasApproved("car", reviews)
-	require.Equal(t, false, ok)
+// func TestHasRequiredApprovals(t *testing.T) {
+// 	reviews := []review{
+// 		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
+// 		{name: "bar", status: "APPROVED", commitID: "ba0d35", id: 3},
+// 	}
+// 	required := []string{"foo", "bar"}
+// 	err := hasRequiredApprovals(reviews, required)
+// 	require.NoError(t, err)
 
-	// Has review and is approved
-	ok = hasApproved("foo", reviews)
-	require.Equal(t, true, ok)
-}
+// 	reviews = []review{
+// 		{name: "foo", status: "APPROVED", commitID: "fe324c", id: 1},
+// 		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
+// 		{name: "baz", status: "APPROVED", commitID: "fe324c", id: 3},
+// 	}
+// 	required = []string{"foo", "reviewer"}
+// 	err = hasRequiredApprovals(reviews, required)
+// 	require.Error(t, err)
 
-func TestHasNewCommit(t *testing.T) {
-	reviews := []review{
-		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
-		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
-		{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 3},
-		{name: "foo", status: "APPROVED", commitID: "fe324c", id: 4},
-		{name: "bar", status: "Commented", commitID: "fe324c", id: 5},
-	}
-	valid, obs := splitReviews("fe324c", reviews)
-	expectedValid := []review{
-		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
-		{name: "foo", status: "APPROVED", commitID: "fe324c", id: 4},
-		{name: "bar", status: "Commented", commitID: "fe324c", id: 5},
-	}
-	expectedObsolete := []review{
-		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
-		{name: "baz", status: "APPROVED", commitID: "ba0d35", id: 3},
-	}
-	require.Equal(t, expectedValid, valid)
-	require.Equal(t, expectedObsolete, obs)
-}
+// }
 
-func TestHasRequiredApprovals(t *testing.T) {
-	reviews := []review{
-		{name: "foo", status: "APPROVED", commitID: "12ga34", id: 1},
-		{name: "bar", status: "APPROVED", commitID: "ba0d35", id: 3},
-	}
-	required := []string{"foo", "bar"}
-	err := hasRequiredApprovals(reviews, required)
-	require.NoError(t, err)
+// func TestMostRecent(t *testing.T) {
+// 	time := time.Now()
+// 	timePlus10 := time.Add(10)
+// 	tests := []struct {
+// 		currentReviews []review
+// 		expectedOutput []review
+// 	}{
+// 		{
+// 			currentReviews: []review{
+// 				{name: "boo", submittedAt: &time},
+// 				{name: "boo", submittedAt: &timePlus10},
+// 				{name: "test", submittedAt: &time}},
+// 			expectedOutput: []review{
+// 				{name: "boo", submittedAt: &timePlus10},
+// 				{name: "test", submittedAt: &time}},
+// 		},
+// 		{
+// 			currentReviews: []review{
+// 				{name: "boo", submittedAt: &time},
+// 				{name: "boo", submittedAt: &timePlus10},
+// 				{name: "test", submittedAt: &time},
+// 				{name: "test", submittedAt: &timePlus10},
+// 				{name: "bar", submittedAt: &time},
+// 			},
 
-	reviews = []review{
-		{name: "foo", status: "APPROVED", commitID: "fe324c", id: 1},
-		{name: "bar", status: "Commented", commitID: "fe324c", id: 2},
-		{name: "baz", status: "APPROVED", commitID: "fe324c", id: 3},
-	}
-	required = []string{"foo", "reviewer"}
-	err = hasRequiredApprovals(reviews, required)
-	require.Error(t, err)
+// 			expectedOutput: []review{
+// 				{name: "bar", submittedAt: &time},
+// 				{name: "boo", submittedAt: &timePlus10},
+// 				{name: "test", submittedAt: &timePlus10},
+// 			},
+// 		},
+// 	}
+// 	for _, test := range tests {
+// 		t.Run("", func(t *testing.T) {
+// 			expected := test.expectedOutput
+// 			sort.Slice(expected, func(i, j int) bool {
+// 				return expected[i].name < expected[j].name
+// 			})
 
-}
-
-func TestMostRecent(t *testing.T) {
-	time := time.Now()
-	timePlus10 := time.Add(10)
-	tests := []struct {
-		currentReviews []review
-		expectedOutput []review
-	}{
-		{
-			currentReviews: []review{
-				{name: "boo", submittedAt: &time},
-				{name: "boo", submittedAt: &timePlus10},
-				{name: "test", submittedAt: &time}},
-			expectedOutput: []review{
-				{name: "boo", submittedAt: &timePlus10},
-				{name: "test", submittedAt: &time}},
-		},
-		{
-			currentReviews: []review{
-				{name: "boo", submittedAt: &time},
-				{name: "boo", submittedAt: &timePlus10},
-				{name: "test", submittedAt: &time},
-				{name: "test", submittedAt: &timePlus10},
-				{name: "bar", submittedAt: &time},
-			},
-
-			expectedOutput: []review{
-				{name: "bar", submittedAt: &time},
-				{name: "boo", submittedAt: &timePlus10},
-				{name: "test", submittedAt: &timePlus10},
-			},
-		},
-	}
-	for _, test := range tests {
-		t.Run("", func(t *testing.T) {
-			expected := test.expectedOutput
-			sort.Slice(expected, func(i, j int) bool {
-				return expected[i].name < expected[j].name
-			})
-
-			revs := mostRecent(test.currentReviews)
-			sort.Slice(revs, func(i, j int) bool {
-				return revs[i].name < revs[j].name
-			})
-			require.Equal(t, expected, revs)
-		})
-	}
-}
+// 			revs := mostRecent(test.currentReviews)
+// 			sort.Slice(revs, func(i, j int) bool {
+// 				return revs[i].name < revs[j].name
+// 			})
+// 			require.Equal(t, expected, revs)
+// 		})
+// 	}
+// }

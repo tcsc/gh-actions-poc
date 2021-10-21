@@ -3,10 +3,8 @@ package bot
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"os"
-	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,32 +17,29 @@ import (
 
 // Check checks if all the reviewers have approved the pull request in the current context.
 func (c *Bot) Check(ctx context.Context) error {
-	// Check if the assigned reviewers have approved this PR.
-	err := c.check(ctx)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	return nil
-}
-
-// check checks to see if all the required reviewers have approved and invalidates
-// approvals for external contributors if a new commit is pushed
-func (c *Bot) check(ctx context.Context) error {
 	pr := c.Environment.Metadata
-	// Remove any stale workflow runs. As only the current workflow run should
-	// be shown because it is the workflow that reflects the correct state of the pull request.
-	err := c.DismissStaleWorkflowRuns(ctx, pr.RepoOwner, pr.RepoName, pr.BranchName)
-	if err != nil {
-		return trace.Wrap(err)
-	}
 	if c.Environment.IsInternal(pr.Author) {
 		return c.checkInternal(ctx)
 	}
 	return c.checkExternal(ctx)
 }
 
+// checkInternal is called to check if a PR reviewed and approved by the
+// required reviewers for internal contributors. Unlike approvals for
+// external contributors, approvals from internal team members will not be
+// invalidated when new changes are pushed to the PR.
 func (c *Bot) checkInternal(ctx context.Context) error {
 	pr := c.Environment.Metadata
+	// Remove any stale workflow runs. As only the current workflow run should
+	// be shown because it is the workflow that reflects the correct state of the pull request.
+	//
+	// Note: This is run for all workflow runs triggered by an event from an internal contributor,
+	// but has to be run again in cron workflow because workflows triggered by external contributors do not
+	// grant the Github actions token the correct permissions to dismiss workflow runs.
+	err := c.dismissStaleWorkflowRuns(ctx, pr.RepoOwner, pr.RepoName, pr.BranchName)
+	if err != nil {
+		return trace.Wrap(err)
+	}
 	mostRecentReviews, err := c.getMostRecentReviews(ctx)
 	if err != nil {
 		return trace.Wrap(err)
@@ -57,9 +52,14 @@ func (c *Bot) checkInternal(ctx context.Context) error {
 	return nil
 }
 
+// checkExternal is called to check if a PR reviewed and approved by the
+// required reviewers for external contributors. Approvals for external
+// contributors are dismissed when new changes are pushed to the PR. The only
+// case in which reviews are not dismissed is if they are from GitHub and
+// only update the PR.
 func (c *Bot) checkExternal(ctx context.Context) error {
-	var obsoleteReviews []review
-	var validReviews []review
+	var obsoleteReviews map[string]review
+	var validReviews map[string]review
 
 	pr := c.Environment.Metadata
 	mostRecentReviews, err := c.getMostRecentReviews(ctx)
@@ -71,10 +71,9 @@ func (c *Bot) checkExternal(ctx context.Context) error {
 	// contributions. As such reviews from previous pushes must
 	// not carry over to when new changes are added. Github does
 	// not do this automatically, so we must dismiss the reviews
-	// manually.
-	if err = c.isGithubCommit(ctx); err != nil {
-		msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
-		err = c.invalidateApprovals(ctx, msg, obsoleteReviews)
+	// manually if there is a file change.
+	if err = c.hasFileChangeFromLastApprovedReview(ctx); err != nil {
+		err = c.invalidateApprovals(ctx, obsoleteReviews)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -89,19 +88,21 @@ func (c *Bot) checkExternal(ctx context.Context) error {
 
 // splitReviews splits a list of reviews into two lists: `valid` (those reviews that refer to
 // the current PR head revision) and `obsolete` (those that do not)
-func splitReviews(headSHA string, reviews []review) (valid, obsolete []review) {
+func splitReviews(headSHA string, reviews map[string]review) (valid, obsolete map[string]review) {
+	valid = make(map[string]review)
+	obsolete = make(map[string]review)
 	for _, r := range reviews {
 		if r.commitID == headSHA {
-			valid = append(valid, r)
+			valid[r.name] = r
 		} else {
-			obsolete = append(obsolete, r)
+			obsolete[r.name] = r
 		}
 	}
-	return
+	return valid, obsolete
 }
 
 // hasRequiredApprovals determines if all required reviewers have approved.
-func hasRequiredApprovals(mostRecentReviews []review, required []string) error {
+func hasRequiredApprovals(mostRecentReviews map[string]review, required []string) error {
 	if len(mostRecentReviews) == 0 {
 		return trace.BadParameter("pull request has no approvals")
 	}
@@ -118,7 +119,7 @@ func hasRequiredApprovals(mostRecentReviews []review, required []string) error {
 	return nil
 }
 
-func (c *Bot) getMostRecentReviews(ctx context.Context) ([]review, error) {
+func (c *Bot) getMostRecentReviews(ctx context.Context) (map[string]review, error) {
 	env := c.Environment
 	pr := c.Environment.Metadata
 	reviews, _, err := env.Client.PullRequests.ListReviews(ctx, pr.RepoOwner,
@@ -126,13 +127,15 @@ func (c *Bot) getMostRecentReviews(ctx context.Context) ([]review, error) {
 		pr.Number,
 		&github.ListOptions{})
 	if err != nil {
-		return []review{}, trace.Wrap(err)
+		return nil, trace.Wrap(err)
 	}
 	currentReviewsSlice := []review{}
 	for _, rev := range reviews {
-		err := checkReviewFields(rev)
+		// Because PRs can be submitted by anyone, input here is attacker controlled
+		// and do strict validation of input.
+		err := validateReviewFields(rev)
 		if err != nil {
-			return []review{}, trace.Wrap(err)
+			return nil, trace.Wrap(err)
 		}
 		currReview := review{
 			name:        *rev.User.Login,
@@ -155,7 +158,10 @@ type review struct {
 	submittedAt *time.Time
 }
 
-func checkReviewFields(review *github.PullRequestReview) error {
+// validateReviewFields validates required fields exist and passes them
+// through a restrictive allow list (alphanumerics only). This is done to
+// mitigate impact of attacker controlled input (the PR).
+func validateReviewFields(review *github.PullRequestReview) error {
 	switch {
 	case review.ID == nil:
 		return trace.Errorf("review ID is nil. review: %+v", review)
@@ -168,7 +174,6 @@ func checkReviewFields(review *github.PullRequestReview) error {
 	case review.User.Login == nil:
 		return trace.Errorf("reviewer User.Login is nil. review: %+v", review)
 	}
-
 	if err := validateField(*review.State); err != nil {
 		return trace.Errorf("review ID err: %v", err)
 	}
@@ -182,7 +187,7 @@ func checkReviewFields(review *github.PullRequestReview) error {
 }
 
 // mostRecent returns a list of the most recent review from each required reviewer.
-func mostRecent(currentReviews []review) []review {
+func mostRecent(currentReviews []review) map[string]review {
 	mostRecentReviews := make(map[string]review)
 	for _, rev := range currentReviews {
 		val, ok := mostRecentReviews[rev.name]
@@ -196,16 +201,12 @@ func mostRecent(currentReviews []review) []review {
 			}
 		}
 	}
-	reviews := make([]review, 0, len(mostRecentReviews))
-	for _, v := range mostRecentReviews {
-		reviews = append(reviews, v)
-	}
-	return reviews
+	return mostRecentReviews
 }
 
 // hasApproved determines if the reviewer has submitted an approval
 // for the pull request.
-func hasApproved(reviewer string, reviews []review) bool {
+func hasApproved(reviewer string, reviews map[string]review) bool {
 	for _, rev := range reviews {
 		if rev.name == reviewer && rev.status == ci.Approved {
 			return true
@@ -224,101 +225,101 @@ func dismissMessage(pr *environment.Metadata, required []string) string {
 	return sb.String()
 }
 
-// isGithubCommit verfies GitHub is the commit author and that the commit is empty.
-// Commits are checked for verification and emptiness specifically to determine if a
-// pull request's reviews should be invalidated. If a commit is signed by Github and is empty
-// there is no need to invalidate commits because the branch is just being updated.
-func (c *Bot) isGithubCommit(ctx context.Context) error {
-	commit, err := c.getValidCommit(ctx)
+// hasFileChangeFromLastApproved checks if there is a file change from the last commit all
+// reviewers approved (if all reviewers approved at a commit) to the current HEAD.
+func (c *Bot) hasFileChangeFromLastApprovedReview(ctx context.Context) error {
+	pr := c.Environment.Metadata
+	lastReviewCommitID, err := c.getLastApprovedReviewCommitID(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	signature := *commit.Commit.Verification.Signature
-	payloadData := *commit.Commit.Verification.Payload
-
-	signatureFileName, err := createAndWriteTempFile(ci.Signature, signature)
+	mostRecent, err := c.getMostRecentReviews(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	defer os.Remove(signatureFileName)
-
-	payloadFileName, err := createAndWriteTempFile(ci.Payload, payloadData)
+	// Make sure all approvals are at the same commit.
+	err = hasAllRequiredApprovalsAtCommit(lastReviewCommitID, mostRecent, c.Environment.GetReviewersForAuthor(pr.Author))
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	defer os.Remove(payloadFileName)
-
-	// GPG verification command requires the signature as the first argument
-	// Runner must have gpg (GnuPG) installed.
-	cmd := exec.Command("gpg", "--verify", signatureFileName, payloadFileName)
-	if err := cmd.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			return trace.BadParameter("commit is not verified and/or is not signed by GitHub")
-		}
+	// Check for any differences
+	err = c.hasFileDiff(ctx, lastReviewCommitID, pr.HeadSHA)
+	if err != nil {
 		return trace.Wrap(err)
 	}
-	return c.hasFileChange(ctx)
+	return nil
 }
 
-// hasFileChange compares all of the files that have changes in the PR to the one at the current commit.
-// This is used for comparing files when Github makes a auto update branch commit to ensure the merge
-// didn't result in changes to the files already in the PR.
-func (c *Bot) hasFileChange(ctx context.Context) error {
+// getLastApprovedReviewCommitID gets the last review's commit ID (last review where a commit was approved).
+func (c *Bot) getLastApprovedReviewCommitID(ctx context.Context) (string, error) {
 	pr := c.Environment.Metadata
 	clt := c.Environment.Client
-	prFiles, _, err := clt.PullRequests.ListFiles(ctx, pr.RepoOwner, pr.RepoName, pr.Number, &github.ListOptions{})
+	reviews, _, err := clt.PullRequests.ListReviews(ctx, pr.RepoOwner, pr.RepoName, pr.Number, &github.ListOptions{})
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	if len(reviews) == 0 {
+		return "", trace.NotFound("pull request has no reviews")
+	}
+
+	// Sort reviews from newest to oldest.
+	sort.Slice(reviews, func(i, j int) bool {
+		time1, time2 := reviews[i].SubmittedAt, reviews[j].SubmittedAt
+		return time2.Before(*time1)
+	})
+	var lastApprovedReview *github.PullRequestReview
+	// Find last approved review.
+	for _, review := range reviews {
+		if review.State == nil {
+			continue
+		}
+		if *review.State == ci.Approved {
+			lastApprovedReview = review
+			break
+		}
+	}
+	if lastApprovedReview == nil {
+		return "", trace.NotFound("no approved reviews found")
+	}
+	if lastApprovedReview.CommitID == nil {
+		return "", trace.NotFound("commit ID not found")
+	}
+	return *lastApprovedReview.CommitID, nil
+}
+
+// hasFileDiff compares two commits and checks if there are changes.
+func (c *Bot) hasFileDiff(ctx context.Context, base, head string) error {
+	pr := c.Environment.Metadata
+	clt := c.Environment.Client
+	comparison, _, err := clt.Repositories.CompareCommits(ctx, pr.RepoOwner, pr.RepoName, base, head)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	headCommit, _, err := clt.Repositories.GetCommit(ctx, pr.RepoOwner, pr.RepoName, pr.HeadSHA)
-	if err != nil {
-		return trace.Wrap(err)
+	if len(comparison.Files) != 0 {
+		return trace.Errorf("detected file change")
 	}
-	for _, headFile := range headCommit.Files {
-		for _, prFile := range prFiles {
-			if *headFile.Filename == *prFile.Filename {
-				return trace.BadParameter("detected file change")
-			}
+	return nil
+}
+
+func hasAllRequiredApprovalsAtCommit(commitSHA string, reviews map[string]review, required []string) error {
+	for _, requiredReviewer := range required {
+		review, ok := reviews[requiredReviewer]
+		if !ok {
+			return trace.BadParameter("all reviewers have not approved")
+		}
+		if review.commitID != commitSHA {
+			return trace.Errorf("all reviewers have not approved at %s", commitSHA)
 		}
 	}
 	return nil
 }
 
-// getValidCommit returns a valid repository commit to perform GPG signature verification on.
-// A valid commit is one that has a signature and a payload.
-func (c *Bot) getValidCommit(ctx context.Context) (*github.RepositoryCommit, error) {
-	pr := c.Environment.Metadata
-	commit, _, err := c.Environment.Client.Repositories.GetCommit(ctx, pr.RepoOwner, pr.RepoName, pr.HeadSHA)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	if commit.Commit.Verification.Signature == nil || commit.Commit.Verification.Payload == nil {
-		return nil, trace.BadParameter("commit is not signed")
-	}
-	return commit, nil
-}
-
-// createAndWriteTempFile creates a temp file and writes to it.
-func createAndWriteTempFile(prefix, data string) (fileName string, err error) {
-	file, err := ioutil.TempFile(os.TempDir(), prefix)
-	if err != nil {
-		return "", trace.Wrap(err)
-	}
-	contents := []byte(data)
-	if _, err = file.Write(contents); err != nil {
-		return "", trace.Wrap(err)
-	}
-	if err := file.Close(); err != nil {
-		return "", trace.Wrap(err)
-	}
-	return file.Name(), nil
-}
-
 // invalidateApprovals dismisses all approved reviews on a pull request.
-func (c *Bot) invalidateApprovals(ctx context.Context, msg string, reviews []review) error {
+func (c *Bot) invalidateApprovals(ctx context.Context, reviews map[string]review) error {
 	pr := c.Environment.Metadata
+	msg := dismissMessage(pr, c.Environment.GetReviewersForAuthor(pr.Author))
 	for _, v := range reviews {
-		if v.status == ci.Approved && pr.HeadSHA != v.commitID {
+		if pr.HeadSHA != v.commitID {
 			_, _, err := c.Environment.Client.PullRequests.DismissReview(ctx,
 				pr.RepoOwner,
 				pr.RepoName,
