@@ -17,10 +17,10 @@ import (
 
 // Check checks if all the reviewers have approved the pull request in the current context.
 func (c *Bot) Check(ctx context.Context) error {
-	pr := c.Environment.Metadata
-	if c.Environment.IsInternal(pr.Author) {
-		return c.checkInternal(ctx)
-	}
+	// pr := c.Environment.Metadata
+	// if c.Environment.IsInternal(pr.Author) {
+	// 	return c.checkInternal(ctx)
+	// }
 	return c.checkExternal(ctx)
 }
 
