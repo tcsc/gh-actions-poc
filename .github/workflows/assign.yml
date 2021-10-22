@@ -24,6 +24,8 @@ jobs:
   auto-request-review:
     name: Auto Request Review
     runs-on: ubuntu-latest
+    env: 
+      REVS: "{\"*\":[\"russjones\", \"r0mant\"], \"joerger\":[\"zmb3\", \"atburke\"], \"fspmarshall\":[\"rosstimothy\", \"codingllama\"], \"xacrimon\":[\"zmb3\", \"joerger\"], \"quinqu\":[\"timothyb89\", \"tcsc\"], \"timothyb89\":[\"codingllama\", \"xacrimon\"], \"tcsc\":[\"nklaassen\", \"codingllama\"], \"nklaassen\":[\"smallinsky\", \"tcsc\"], \"r0mant\":[\"smallinsky\", \"timothyb89\"], \"smallinsky\":[\"joerger\", \"r0mant\"], \"codingllama\":[\"rosstimothy\", \"quinqu\"], \"rosstimothy\":[\"r0mant\", \"fspmarshall\"], \"zmb3\":[\"rosstimothy\", \"xacrimon\"], \"atburke\":[\"nklaassen\", \"fspmarshall\"]}"
     steps:
       - name: Event name 
         run: echo ${{ github.event_name}}
@@ -35,8 +37,6 @@ jobs:
           ref: dev-workflow       
       - name: Installing the latest version of Go.
         uses: actions/setup-go@v2
-      - name: Save reviewers in env 
-        run: export REVS="{\"*\":[\"russjones\", \"r0mant\"], \"joerger\":[\"zmb3\", \"atburke\"], \"fspmarshall\":[\"rosstimothy\", \"codingllama\"], \"xacrimon\":[\"zmb3\", \"joerger\"], \"quinqu\":[\"timothyb89\", \"tcsc\"], \"timothyb89\":[\"codingllama\", \"xacrimon\"], \"tcsc\":[\"nklaassen\", \"codingllama\"], \"nklaassen\":[\"smallinsky\", \"tcsc\"], \"r0mant\":[\"smallinsky\", \"timothyb89\"], \"smallinsky\":[\"joerger\", \"r0mant\"], \"codingllama\":[\"rosstimothy\", \"quinqu\"], \"rosstimothy\":[\"r0mant\", \"fspmarshall\"], \"zmb3\":[\"rosstimothy\", \"xacrimon\"], \"atburke\":[\"nklaassen\", \"fspmarshall\"]}"
       - run: echo $REVS
       # Run "assign-reviewers" subcommand on bot.
       - name: Assigning reviewers 
