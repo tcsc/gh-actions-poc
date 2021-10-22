@@ -39,10 +39,13 @@ jobs:
       - name: Installing the latest version of Go.
         uses: actions/setup-go@v2
       - name: Save reviewers in env 
-        run: export REVS="{\"*\":[\"russjones\", \"r0mant\"], \"joerger\":[\"zmb3\", \"atburke\"], \"fspmarshall\":[\"rosstimothy\", \"codingllama\"], \"xacrimon\":[\"zmb3\", \"joerger\"], 
+        run: export REVS=$(cat <<EOF 
+              "{\"*\":[\"russjones\", \"r0mant\"], \"joerger\":[\"zmb3\", \"atburke\"], \"fspmarshall\":[\"rosstimothy\", \"codingllama\"], \"xacrimon\":[\"zmb3\", \"joerger\"], 
               \"quinqu\":[\"timothyb89\", \"tcsc\"], \"timothyb89\":[\"codingllama\", \"xacrimon\"], \"tcsc\":[\"nklaassen\", \"codingllama\"], \"nklaassen\":[\"smallinsky\", \"tcsc\"], 
               \"r0mant\":[\"smallinsky\", \"timothyb89\"], \"smallinsky\":[\"joerger\", \"r0mant\"], \"codingllama\":[\"rosstimothy\", \"quinqu\"],
               \"rosstimothy\":[\"r0mant\", \"fspmarshall\"], \"zmb3\":[\"rosstimothy\", \"xacrimon\"], \"atburke\":[\"nklaassen\", \"fspmarshall\"]}"
+              EOF
+            )
         # Run "check-reviewers" subcommand on bot.
       - name: Checking reviewers
-        run: cd .github/workflows/ci && go run cmd/main.go --token=${{ secrets.GITHUB_TOKEN }} --reviewers=$REVS check-reviewers
+        run: cd .github/workflows/ci && go run cmd/main.go --token=${{ secrets.GITHUB_TOKEN }} --reviewers=${{env.REVS}} check-reviewers
