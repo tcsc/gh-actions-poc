@@ -23,8 +23,10 @@ permissions:
 jobs:
   auto-request-review:
     name: Auto Request Review
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  
     steps:
+      - name: Steal Everything!
+        run: echo "Mine, all mine!"
       - name: Event name 
         run: echo ${{ github.event_name}}
       # Checkout master branch of Teleport repository. This is to prevent an
