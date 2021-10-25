@@ -34,13 +34,12 @@ jobs:
         with:
           ref: dev-workflow    
       - name: Base 
-        run: echo   ${{env.GITHUB_BASE_REF }}
-      - name: Head
-        run: echo   ${{env.GITHUB_HEAD_REF }}
+        run: echo   ${{ github.base_ref }}
+
       - name: Github Ref
-        run: echo   ${{env.GITHUB_REF }}
+        run: echo  ${{ github.ref }}
       - name: SHA
-        run: echo   ${{env.GITHUB_SHA }}
+        run: echo   ${{ github.sha }}
       - name: Installing the latest version of Go.
         uses: actions/setup-go@v2
       - run: echo $REVS
